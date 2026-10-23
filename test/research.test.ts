@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Research, researchLimitsSchema } from '../src/research.js';
-import type { Evidence, Snapshot } from '../src/model.js';
+import type { Evidence, Notes, Snapshot } from '../src/model.js';
 import { fixture } from './helpers.js';
 import { prepare } from '../src/prepare.js';
 
@@ -124,6 +124,80 @@ test('shorthand issue references must be investigated and link depth bounds exte
   await call(r, 'issue', { repository: 'other/storage', number: 8 });
   assert.doesNotThrow(() => r.assertInvestigated());
   assert.match((await call(r, 'pull_request', { repository: 'other/storage', number: 9 })).error, /outside/);
+});
+test('unavailable auxiliary shorthand is recorded, never cited, and marks affected notes for review', async () => {
+  const input = structuredClone(evidence);
+  input.changes[0]!.pull!.body += '\ncompanion PR #1869, JuiceFS #4879/#3942';
+  const r = new Research(snapshot, input, limits, undefined, mock().fetcher);
+  await call(r, 'pull_request');
+  await call(r, 'issue', { repository: 'other/storage', number: 8 });
+  assert.throws(() => r.assertInvestigated(), /issue\/1869/);
+  for (const number of [1869, 4879]) {
+    const result = await call(r, 'issue', { number });
+    assert.equal(result.unavailableReference.status, 404);
+    assert.deepEqual(result.unavailableReference.sources, ['pr:1']);
+  }
+  assert.doesNotThrow(() => r.assertInvestigated());
+  const finding = { sources: ['pr:1'], userProblem: 'Incomplete migration', implementation: 'Propagate errors',
+    outcome: 'Failed listing stops migration', evidenceUrls: ['https://github.com/example/storage/pull/1'], limitations: [], needsReview: false };
+  assert.throws(() => r.recordFindings({ findings: [{ ...finding, evidenceUrls: ['https://github.com/example/storage/issues/1869'] }] }), /not returned/);
+  r.recordFindings({ findings: [finding] });
+  const report = (r.artifact() as any).findings.findings[0];
+  assert.equal(report.needsReview, true);
+  assert.match(report.limitations.join('\n'), /example\/storage#1869 returned HTTP 404/);
+  assert.equal((r.artifact() as any).unavailableReferences.length, 2);
+  const notes: Notes = { entries: [{ category: 'fixes', summary: 'Migration copy errors are reported', impact: '',
+    sources: ['pr:1'], upgradeNotes: [], needsReview: false }], excluded: [] };
+  r.markReviewRequired(notes);
+  assert.equal(notes.entries[0]!.needsReview, true);
+  assert.ok(!r.citationUrls().some(url => url.includes('1869')));
+});
+test('missing source PRs cannot be excused as unavailable auxiliary evidence', async () => {
+  const m = mock();
+  const r = new Research(snapshot, evidence, limits, undefined, async (url, init) => {
+    if (String(url).endsWith('/pulls/1')) return new Response('{}', { status: 404 });
+    return m.fetcher(url, init);
+  });
+  const result = await call(r, 'pull_request');
+  assert.equal(result.unavailableReference, undefined);
+  await call(r, 'issue', { repository: 'other/storage', number: 8 });
+  assert.throws(() => r.assertInvestigated(), /pull_request\/1/);
+});
+test('only direct auxiliary HTTP 404 or 410 resolves an attempted required read', async () => {
+  for (const status of [404, 410, 401, 403, 429, 500]) {
+    const m = mock();
+    const r = new Research(snapshot, evidence, limits, undefined, async (url, init) => {
+      if (String(url).endsWith('/issues/8')) return new Response('{}', { status });
+      return m.fetcher(url, init);
+    });
+    await call(r, 'pull_request');
+    await call(r, 'issue', { repository: 'other/storage', number: 8 });
+    if ([404, 410].includes(status)) assert.doesNotThrow(() => r.assertInvestigated());
+    else assert.throws(() => r.assertInvestigated(), /other\/storage\/issue\/8/);
+  }
+  const m = mock();
+  const r = new Research(snapshot, evidence, limits, undefined, async (url, init) => {
+    if (String(url).endsWith('/repos/other/storage')) return new Response('{}', { status: 404 });
+    return m.fetcher(url, init);
+  });
+  await call(r, 'pull_request');
+  await call(r, 'issue', { repository: 'other/storage', number: 8 });
+  assert.throws(() => r.assertInvestigated(), /other\/storage\/issue\/8/);
+});
+test('unavailable evidence tracks every referring source without flagging unrelated findings', async () => {
+  const input = structuredClone(evidence);
+  input.changes.push({ id: 'commit:abc', diff: '', commits: [{ sha: 'abc', parents: [], subject: 'Context', message: 'Related other/storage#8' }] });
+  input.changes.push({ id: 'commit:def', diff: '', commits: [] });
+  const m = mock();
+  const r = new Research(snapshot, input, limits, undefined, async (url, init) => {
+    if (String(url).endsWith('/issues/8')) return new Response('{}', { status: 410 });
+    return m.fetcher(url, init);
+  });
+  await call(r, 'pull_request');
+  await call(r, 'issue', { repository: 'other/storage', number: 8 });
+  r.recordFindings({ findings: input.changes.map(c => ({ sources: [c.id], userProblem: 'Task', implementation: 'Change', outcome: 'Outcome',
+    evidenceUrls: ['https://github.com/example/storage/pull/1'], limitations: [], needsReview: false })) });
+  assert.deepEqual((r.findingsReport() as any).findings.map((f: any) => f.needsReview), [true, true, false]);
 });
 test('provider diagnostics exclude arbitrary response messages and stacks', () => {
   const r = new Research(snapshot, evidence, limits);

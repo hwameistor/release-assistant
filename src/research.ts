@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import { z } from 'zod';
 import type { Tool } from '@github/copilot-sdk';
-import type { Evidence, Snapshot } from './model.js';
+import type { Evidence, Notes, Snapshot } from './model.js';
 
 const repository = z.string().regex(/^[\w.-]+\/[\w.-]+$/);
 const sha = /^[a-f0-9]{40}$/i;
@@ -34,6 +34,12 @@ export const findingsSchema = z.object({
   }).strict()).min(1),
 }).strict();
 type Target = { repository: string; kind: 'issue' | 'pull_request'; number: number; depth: number };
+class ResearchHttpError extends Error {
+  constructor(readonly status: number, readonly path: string) {
+    super(`GitHub research request failed (HTTP ${status}); no evidence was obtained`);
+  }
+}
+type UnavailableReference = Target & { status: number; sources: string[] };
 interface Document { url: string; fetchedAt: string; content: string; sha256: string; revision?: string }
 export interface ResearchRecord {
   arguments: Args | { invalid: true }; status: 'success' | 'error'; result: unknown;
@@ -45,6 +51,9 @@ export class Research {
   readonly records: ResearchRecord[] = [];
   private targets = new Map<string, Target>();
   private required = new Map<string, Target>();
+  private sourcePulls = new Set<string>();
+  private requiredSources = new Map<string, Set<string>>();
+  private unavailable = new Map<string, UnavailableReference>();
   private read = new Set<string>();
   private revisions = new Map<string, Set<string>>();
   private documents = new Map<string, Promise<Document>>();
@@ -65,33 +74,45 @@ export class Research {
     this.sourceIds = new Set(evidence.changes.map(change => change.id));
     this.revisions.set(snapshot.repository.toLowerCase(), new Set([snapshot.fromSha, snapshot.toSha]));
     for (const change of evidence.changes) {
-      if (change.pull) this.allow({ repository: snapshot.repository, kind: 'pull_request', number: change.pull.number, depth: 0 }, true);
+      if (change.pull) {
+        const target: Target = { repository: snapshot.repository, kind: 'pull_request', number: change.pull.number, depth: 0 };
+        this.sourcePulls.add(key(target));
+        this.allow(target, true, change.id);
+      }
       if (change.originalPull) this.allow({ repository: snapshot.repository, kind: 'pull_request', number: change.originalPull.number, depth: 0 });
-      this.discover([change.pull?.body ?? '', change.originalPull?.body ?? '', ...change.commits.map(c => c.message)].join('\n'), snapshot.repository, 0, true);
+      this.discover([change.pull?.body ?? '', change.originalPull?.body ?? '', ...change.commits.map(c => c.message)].join('\n'), snapshot.repository, 0, true, change.id);
     }
     for (const target of this.required.values()) {
       if (target.kind === 'pull_request') this.required.delete(key({ ...target, kind: 'issue' }));
     }
   }
-  private allow(target: Target, required = false): void {
+  private allow(target: Target, required = false, source?: string): void {
     if (target.depth > this.limits.maxDepth) return;
     const id = key(target), previous = this.targets.get(id);
     if (!previous || target.depth < previous.depth) this.targets.set(id, target);
-    if (required) this.required.set(id, target);
+    if (required) {
+      this.required.set(id, target);
+      if (source) {
+        const sources = this.requiredSources.get(id) ?? new Set<string>();
+        sources.add(source);
+        this.requiredSources.set(id, sources);
+      }
+    }
   }
-  private discover(text: string, repo: string, depth: number, required = false): void {
+  private discover(text: string, repo: string, depth: number, required = false, source?: string): void {
     for (const match of text.matchAll(/https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(issues|pull)\/(\d+)\b/gi)) {
-      this.allow({ repository: match[1]!, kind: match[2]!.toLowerCase() === 'issues' ? 'issue' : 'pull_request', number: Number(match[3]), depth }, required && match[2]!.toLowerCase() === 'issues');
+      this.allow({ repository: match[1]!, kind: match[2]!.toLowerCase() === 'issues' ? 'issue' : 'pull_request', number: Number(match[3]), depth }, required && match[2]!.toLowerCase() === 'issues', source);
     }
     // GitHub shorthand can name either an issue or a PR. The issue endpoint identifies which.
     for (const match of text.matchAll(/(?:^|[\s(])(?:([\w.-]+\/[\w.-]+))?#(\d+)\b/g)) {
-      this.allow({ repository: match[1] ?? repo, kind: 'issue', number: Number(match[2]), depth }, required);
+      this.allow({ repository: match[1] ?? repo, kind: 'issue', number: Number(match[2]), depth }, required, source);
       this.allow({ repository: match[1] ?? repo, kind: 'pull_request', number: Number(match[2]), depth });
     }
   }
   instructions(): string {
     return `You are an investigating release editor. Actively use github_research to read PRs and linked issues, then follow relevant discussions, companion PRs, changed files and tests as needed. Do not merely restate the pre-collected evidence.
 Read every required target below before finalizing. If a GitHub shorthand reference is ambiguous, read it as an issue first; its pull_request field identifies a PR. Issue reports establish symptoms, not proof of a fix. Compare actual code and tests with the frozen netDiff to establish what this release changes. External PRs and other revisions are context, never additional shipped source IDs.
+Source PRs must be read successfully. A required auxiliary reference returning HTTP 404/410 is recorded as unavailable, not read evidence: do not repeatedly retry or cite it. Investigate correctly qualified references if available, document the limitation and qualify the affected findings. The host marks affected sources for review. Authentication, rate-limit and server failures do not satisfy required reads.
 When a PR has no issue, reason from its actual before/after code and inspect surrounding code if needed. Explain the affected user scenario, supported solution, outcome and limitations; consolidate related PRs. Never invent a defect or guarantee.
 Only the source repository and explicit GitHub references reachable within ${this.limits.maxDepth} link levels are accessible. Source file reads use frozen from/to SHAs; PR reads expose immutable base/head/merge revisions for further file reads. Use only those revisions. The tool returns paginated, chunked evidence with nextPage/nextOffset; a fragment is not the complete document. If relevant evidence is inaccessible, qualify conclusions and set needsReview.
 Budget: ${this.limits.maxCalls} calls, ${this.limits.maxBytes} returned bytes. Tool errors and budgets are explicit; do not claim you read material you did not receive.
@@ -141,10 +162,27 @@ Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
         throw new Error(this.failure);
       }
       this.bytes += bytes;
-      if (value.operation === 'issue' || value.operation === 'pull_request') this.read.add(key({ repository: value.repository, kind: value.operation, number: value.number! }));
+      if (value.operation === 'issue' || value.operation === 'pull_request') {
+        const id = key({ repository: value.repository, kind: value.operation, number: value.number! });
+        this.read.add(id);
+        this.unavailable.delete(id);
+      }
       this.records.push({ arguments: value, status: 'success', result });
     } catch (error) {
       result = { error: error instanceof Error ? error.message : 'Research failed' };
+      if (error instanceof ResearchHttpError && [404, 410].includes(error.status)
+        && (value.operation === 'issue' || value.operation === 'pull_request')
+        && error.path === `/repos/${value.repository}/${value.operation === 'issue' ? 'issues' : 'pulls'}/${value.number}`) {
+        const id = key({ repository: value.repository, kind: value.operation, number: value.number! });
+        const target = this.required.get(id);
+        // A failed repository lookup, source PR read or unrelated tool call cannot waive a required read.
+        if (target && !this.sourcePulls.has(id)) {
+          const reference = { ...target, status: error.status, sources: [...this.requiredSources.get(id) ?? []] };
+          this.unavailable.set(id, reference);
+          result = { ...result as object, unavailableReference: reference,
+            guidance: 'This auxiliary reference could not be read. Do not cite it or retry the same address. Follow correctly qualified references if available; affected findings will retain this limitation and require review.' };
+        }
+      }
       if (!this.closed && this.calls <= this.limits.maxCalls + 1) this.records.push({ arguments: value, status: 'error', result });
     }
     return result;
@@ -167,7 +205,7 @@ Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
     // Paths are constructed below, never supplied by the model or repository text.
     const response = await this.fetcher(`https://api.github.com${path}`, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(30000),
       headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(authenticated && this.token ? { Authorization: `Bearer ${this.token}` } : {}) } });
-    if (!response.ok) throw new Error(`GitHub research request failed (HTTP ${response.status}); no evidence was obtained`);
+    if (!response.ok) throw new ResearchHttpError(response.status, path);
     return response.json();
   }
   private async publicRepo(repo: string): Promise<void> {
@@ -253,7 +291,7 @@ Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
   assertInvestigated(): void {
     if (this.failure) throw new Error(this.failure);
     if (!this.records.some(r => r.status === 'success')) throw new Error('Copilot did not use GitHub research tools; refusing to publish an uninvestigated result');
-    const missing = [...this.required].filter(([id]) => !this.read.has(id)).map(([, t]) => `${t.repository}/${t.kind}/${t.number}`);
+    const missing = [...this.required].filter(([id]) => !this.read.has(id) && !this.unavailable.has(id)).map(([, t]) => `${t.repository}/${t.kind}/${t.number}`);
     if (missing.length) throw new Error(`Copilot did not read required release evidence: ${missing.join(', ')}`);
   }
   recordFindings(value: unknown): void {
@@ -274,11 +312,25 @@ Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
       if (finding.evidenceUrls.some(url => !urls.has(resource(url)))) throw new Error('Research finding cites evidence not returned by a tool');
     }
     if ([...this.sourceIds].some(id => !covered.has(id))) throw new Error('Research findings do not account for every release change');
+    for (const reference of this.unavailable.values()) {
+      for (const finding of report.findings.filter(f => f.sources.some(id => reference.sources.includes(id)))) {
+        finding.needsReview = true;
+        finding.limitations.push(`Auxiliary reference ${reference.repository}#${reference.number} returned HTTP ${reference.status}; no evidence was obtained. Verify the reference or qualify conclusions using other successfully read evidence.`);
+      }
+    }
     this.findings = report;
     this.rejectedFindings = undefined;
   }
   citationUrls(): string[] {
     return [...new Set(this.records.filter(r => r.status === 'success').map(r => (r.result as { url: string }).url))];
+  }
+  findingsReport(): unknown { return this.findings; }
+  markReviewRequired(notes: Notes): void {
+    const sources = new Set([
+      ...this.findings?.findings.filter(f => f.needsReview).flatMap(f => f.sources) ?? [],
+      ...[...this.unavailable.values()].flatMap(r => r.sources),
+    ]);
+    for (const entry of notes.entries) if (entry.sources.some(id => sources.has(id))) entry.needsReview = true;
   }
   recordDiagnostic(phase: string, data: { errorType?: string; errorCode?: string; statusCode?: number; providerErrorType?: string; providerErrorParam?: string }): void {
     // Never retain model response bodies, arbitrary messages, stacks or credential-bearing URLs.
@@ -289,6 +341,7 @@ Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
   async close(): Promise<void> { this.closed = true; await this.queue; }
   artifact(): object {
     return { schemaVersion: 1, snapshot: this.snapshot, limits: this.limits, calls: this.calls, returnedBytes: this.bytes,
-      requiredTargets: [...this.required.values()], findings: this.findings, rejectedFindings: this.rejectedFindings, diagnostics: this.diagnostics, records: this.records };
+      requiredTargets: [...this.required.values()], unavailableReferences: [...this.unavailable.values()],
+      findings: this.findings, rejectedFindings: this.rejectedFindings, diagnostics: this.diagnostics, records: this.records };
   }
 }

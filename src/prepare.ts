@@ -148,6 +148,7 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
     }
   }
   const notes = validateNotes(generated, evidence);
+  research?.markReviewRequired(notes);
   const releaseNotes = renderNotes(notes, snapshot, template);
   const files: Record<string, string> = {
     [paths[0]!]: updateChangelog(await github.file(paths[0]!, snapshot.targetSha) ?? '', options.version, releaseNotes),
