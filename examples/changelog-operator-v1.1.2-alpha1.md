@@ -16,7 +16,7 @@
 
 ### Changes
 
-- Migration checks are now enabled by default through `--migrate-check=true`, including on existing member DaemonSets. ([#400](https://github.com/hwameistor/hwameistor-operator/pull/400))
-- The default migration image tag is now `v1.2.0`, with `JUICEFS_VERSION=1.2.0`. Select the binary version through `localStorage.migrate.juicesync.version`. ([#400](https://github.com/hwameistor/hwameistor-operator/pull/400))
+- Migration checks, previously disabled by default, are now enabled for new and existing Local Storage member DaemonSets, so users no longer need to enable them manually. ([#400](https://github.com/hwameistor/hwameistor-operator/pull/400))
+- Select the migration binary through `localStorage.migrate.juicesync.version` to use an available version suited to your workloads without changing Operator code. The default is JuiceFS `1.2.0` in migration image `v1.2.0`. ([#400](https://github.com/hwameistor/hwameistor-operator/pull/400))
 
 [Full diff](https://github.com/hwameistor/hwameistor-operator/compare/e0b6bc166135f42c4afe5080983dd3e2e9d71949...61fe6fbadf53a46e375208ca24c52af7c16c48b0)
