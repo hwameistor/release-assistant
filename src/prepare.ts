@@ -7,11 +7,13 @@ import { loadConfig, outputPaths, safePath, type Config } from './config.js';
 import { GitHub } from './github.js';
 import { GitSource } from './git.js';
 import { collect } from './collect.js';
-import { notesSchema, snapshotSchema, type GenerateOptions, type Manifest, type Provider, type Pull, type Snapshot } from './model.js';
+import { notesSchema, snapshotSchema, recentTagChoiceSchema, type GenerateOptions, type Manifest, type Provider, type Pull, type Snapshot } from './model.js';
 import { providerFor } from './providers.js';
 import { renderNotes, updateChangelog, updateChart, validateNotes } from './render.js';
 import { readOutput, writeOutput } from './storage.js';
 import { loadPolicy, type PolicySource } from './policy.js';
+import { chooseTag, recentTags } from './tags.js';
+import { sourceRangeSummary } from './summary.js';
 
 export const statePath = '.release-assistant/snapshot.json';
 export const manifestPath = '.release-assistant/manifest.json';
@@ -52,7 +54,9 @@ async function materials(github: GitHub, options: GenerateOptions, localConfig?:
 export interface PrepareDependencies { github: GitHub; git: GitSource; provider?: Provider; now?: () => Date; localConfig?: string; policyFetch?: typeof fetch }
 export async function prepare(input: GenerateOptions, dependencies: PrepareDependencies): Promise<{ branch: string; pull?: Pull; manifest: Manifest }> {
   const { github, git } = dependencies;
-  const options = { ...input, version: normalizeVersion(input.version), fromTag: input.fromTag.replace(/^refs\/tags\//, '') };
+  const options = { ...input, version: normalizeVersion(input.version), fromTag: (input.fromTag ?? '').trim().replace(/^refs\/tags\//, '') };
+  if (/[\r\n\0]/.test(options.fromTag)) throw new Error('Invalid from-tag');
+  const tagChoice = options.fromTag ? undefined : recentTagChoiceSchema.parse(input.fromTagChoice || 'latest');
   const now = dependencies.now ?? (() => new Date());
   const branch = releaseBranch(options.repository, options.targetBranch, options.version);
   const target = await github.requiredRef('heads', options.targetBranch);
@@ -70,13 +74,24 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
     if (saved) previous = snapshotSchema.parse(JSON.parse(saved));
   }
   if (previous) assertIdentity(previous, options);
-  const sameRange = previous?.fromTag === options.fromTag && previous.toRef === options.toRef;
-  const snapshot: Snapshot = previous && sameRange ? previous : {
-    schemaVersion: 1, repository: options.repository, targetBranch: options.targetBranch, version: options.version,
-    fromTag: options.fromTag, toRef: options.toRef,
-    fromSha: await github.requiredRef('tags', options.fromTag), toSha: await github.resolve(options.toRef),
-    targetSha: target, createdAt: now().toISOString(), generatedPaths: [],
-  };
+  const sameRange = previous?.toRef === options.toRef && (tagChoice
+    ? previous?.fromTagSelection?.choice === tagChoice
+    : !previous?.fromTagSelection && previous?.fromTag === options.fromTag);
+  let snapshot: Snapshot;
+  if (previous && sameRange) snapshot = previous;
+  else {
+    const toSha = await github.resolve(options.toRef);
+    if (!await git.ancestor(toSha, target)) throw new Error('Invalid range ancestry');
+    const candidates = tagChoice ? await recentTags(git, toSha, options.version) : undefined;
+    const selected = tagChoice ? chooseTag(candidates!, tagChoice) : undefined;
+    snapshot = {
+      schemaVersion: 1, repository: options.repository, targetBranch: options.targetBranch, version: options.version,
+      fromTag: selected?.name ?? options.fromTag, toRef: options.toRef,
+      fromSha: selected?.sha ?? await github.requiredRef('tags', options.fromTag), toSha,
+      targetSha: target, createdAt: now().toISOString(), generatedPaths: [],
+      ...(tagChoice ? { fromTagSelection: { choice: tagChoice, candidates: candidates! } } : {}),
+    };
+  }
   if (options.publish) {
     assertCurrent(snapshot, target);
     if (snapshot.toSha !== target) throw new Error('A Release PR must end at the target branch HEAD; use preview mode for historical tag ranges');
@@ -146,6 +161,7 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
     pull = await github.upsertPull(latestPull, branch, options.targetBranch, `chore(release): ${options.version}`,
       `Prepare **${options.version}** for \`${options.targetBranch}\`.\n\n` +
       releaseNotes + '\n<details>\n<summary>Generation details</summary>\n\n' +
+      sourceRangeSummary(snapshot) + '\n' +
       `Source range: [${snapshot.fromSha.slice(0, 7)}…${snapshot.toSha.slice(0, 7)}](https://github.com/${options.repository}/compare/${snapshot.fromSha}...${snapshot.toSha}).\n\n` +
       `Configuration/template revision: \`${templateSha}\`. Provider: ${config.ai.provider}; model: ${config.ai.model}.\n\n` +
       `Policy source (${policySource.kind}): \`${policySource.location.replaceAll('`', '%60')}\`${policySource.sha ? ` at \`${policySource.sha}\`` : ''}. SHA-256: \`${hash(policy)}\`.\n\n` +

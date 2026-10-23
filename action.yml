@@ -12,7 +12,10 @@ inputs:
   version:
     description: Release version, including optional prerelease suffix
   from-tag:
-    description: Starting tag (exclusive)
+    description: Optional starting tag (exclusive); overrides automatic selection
+  from-tag-choice:
+    description: Automatic starting tag rank when from-tag is empty (latest, second-latest, third-latest)
+    default: latest
   to-ref:
     description: Ending tag, branch or SHA (inclusive); defaults to target branch
   template-ref:
@@ -46,6 +49,15 @@ inputs:
   api-key:
     description: API key for the configured compatible model endpoint
 outputs:
+  from-tag:
+    description: Resolved starting tag
+    value: ${{ steps.run.outputs.from-tag }}
+  from-sha:
+    description: Frozen starting commit
+    value: ${{ steps.run.outputs.from-sha }}
+  recent-tags:
+    description: JSON array of automatic tag candidates (empty for manual selection)
+    value: ${{ steps.run.outputs.recent-tags }}
   branch:
     description: Stable generated branch
     value: ${{ steps.run.outputs.branch }}
@@ -94,6 +106,7 @@ runs:
         RA_TARGET_BRANCH: ${{ inputs.target-branch }}
         RA_VERSION: ${{ inputs.version }}
         RA_FROM_TAG: ${{ inputs.from-tag }}
+        RA_FROM_TAG_CHOICE: ${{ inputs.from-tag-choice }}
         RA_TO_REF: ${{ inputs.to-ref }}
         RA_TEMPLATE_REF: ${{ inputs.template-ref }}
         RA_MODEL: ${{ inputs.model }}

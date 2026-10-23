@@ -10,11 +10,19 @@ The product contract is in [docs/specification.md](docs/specification.md). Chang
 2. Copy `templates/changelog-policy.md` and `templates/changelog.md` into that repository's `.release-assistant/` directory. Both are versioned and can be edited independently of the tool.
 3. Install [Prepare release](examples/prepare-release.yml) and [Validate release PR](examples/validate-release.yml) in `.github/workflows/`. Pin the Action to a reviewed full commit SHA. Install validation on each release branch too.
 4. Configure the credentials below. Enable the validation check and require the release branch to be up to date before merging.
-5. Run **Prepare release**, choosing the target branch, version, starting tag, optional ending ref and model. Open the draft PR from the link at the top of the run summary. Its description shows the full version Changelog, with generation details collapsed below. Review its notes, excluded changes and Chart version before marking it ready.
+5. Run **Prepare release**, choosing the target branch, version, starting tag rank (or a manual tag), optional ending ref and model. Open the draft PR from the link at the top of the run summary. Its description shows the full version Changelog, with generation details collapsed below. Review its notes, excluded changes and Chart version before marking it ready.
 
 The Action and the example workflow's `prepare` job expose the created or updated URL as `pull-request-url`. **Re-run all jobs** refreshes the same PR's description and generated files with the latest notes. Preview mode generates artifacts without creating or linking a release PR.
 
 For example, `target_branch=release/v1.1`, `version=v1.1.2-alpha1`, `from_tag=v1.1.1` produces notes for changes after `v1.1.1` through the resolved target HEAD. Version and range are independent inputs. Release PRs must cover the target HEAD; use preview mode for older tag-to-tag intervals.
+
+### Choose a starting tag
+
+Leave `from_tag` empty to discover the three highest SemVer tags reachable from the ending commit and lower than the proposed release version. Choose `latest` (default), `second-latest`, or `third-latest` in `from_tag_choice`. GitHub's native form cannot dynamically load tag names into its dropdown: the actual names, selected tag and frozen SHA appear in the run summary, PR generation details and snapshot artifact after resolution. Annotated and lightweight tags, with or without a `v` prefix, are supported; prereleases are included. Ranking uses SemVer, not tag creation dates. Tags outside the selected history, non-SemVer tags and versions at or above the proposed release are excluded. Selecting an unavailable rank fails without silently choosing another tag.
+
+To specify any existing tag, including a non-SemVer baseline or one outside the three suggestions, fill in `from_tag`; it overrides `from_tag_choice` and still passes the ancestry checks. In the Action/CLI these inputs are `from-tag` / `--from-tag` and `from-tag-choice` / `--from-tag-choice`. The Action and example prepare job expose the resolved `from-tag`, `from-sha` and `recent-tags` (JSON candidates, empty for manual selection).
+
+The actual tag, commit and candidate list are frozen before inference. Re-running the same selection keeps that snapshot even if tags are added, moved or deleted. To change the starting point, start a new run with a different rank or an explicit tag. An explicit new `to_ref` refreshes the range and automatic candidates while reusing the same open Release PR.
 
 The generated PR updates only the configured cumulative Changelog, version log, Chart `version`/`appVersion`, and `.release-assistant/{snapshot,manifest}.json`. Dependency and tool image versions, including JuiceFS, are not changed.
 

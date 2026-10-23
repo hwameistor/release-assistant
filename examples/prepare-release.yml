@@ -11,9 +11,17 @@ on:
         description: Version, for example v1.1.2-alpha1
         required: true
         type: string
+      from_tag_choice:
+        description: Automatic starting tag when from_tag is empty (highest SemVer first)
+        default: latest
+        type: choice
+        options:
+          - latest
+          - second-latest
+          - third-latest
       from_tag:
-        description: Starting tag (exclusive), for example v1.1.1
-        required: true
+        description: Optional manual starting tag; overrides automatic selection
+        required: false
         type: string
       to_ref:
         description: Ending ref (inclusive); empty means target branch HEAD
@@ -43,6 +51,9 @@ jobs:
     runs-on: ubuntu-latest # Or a trusted self-hosted runner; no GPU needed.
     outputs:
       pull-request-url: ${{ steps.release.outputs.pull-request-url }}
+      from-tag: ${{ steps.release.outputs.from-tag }}
+      from-sha: ${{ steps.release.outputs.from-sha }}
+      recent-tags: ${{ steps.release.outputs.recent-tags }}
     steps:
       - uses: hwameistor/release-assistant@main # Replace main with a reviewed full commit SHA.
         id: release
@@ -50,6 +61,7 @@ jobs:
           target-branch: ${{ inputs.target_branch }}
           version: ${{ inputs.version }}
           from-tag: ${{ inputs.from_tag }}
+          from-tag-choice: ${{ inputs.from_tag_choice }}
           to-ref: ${{ inputs.to_ref }}
           template-ref: refs/heads/main
           model: ${{ inputs.model }}

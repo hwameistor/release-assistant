@@ -26,16 +26,23 @@ export interface Change {
   diff: string;
 }
 export interface Evidence { changes: Change[]; netDiff: string; warnings: string[] }
+export const recentTagChoiceSchema = z.enum(['latest', 'second-latest', 'third-latest']);
+export type RecentTagChoice = z.infer<typeof recentTagChoiceSchema>;
+export interface TagCandidate { name: string; sha: string }
 export const snapshotSchema = z.object({
   schemaVersion: z.literal(1), repository: z.string(), targetBranch: z.string(), version: z.string(),
   fromTag: z.string(), toRef: z.string(), fromSha: z.string().regex(/^[a-f0-9]{40}$/),
   toSha: z.string().regex(/^[a-f0-9]{40}$/), targetSha: z.string().regex(/^[a-f0-9]{40}$/),
   createdAt: z.string(), generatedPaths: z.array(z.string()).default([]),
+  fromTagSelection: z.object({
+    choice: recentTagChoiceSchema,
+    candidates: z.array(z.object({ name: z.string(), sha: z.string().regex(/^[a-f0-9]{40}$/) })).min(1).max(3),
+  }).optional(),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;
 export interface Provider { generate(prompt: string, schema: object): Promise<unknown> }
 export interface GenerateOptions {
-  repository: string; targetBranch: string; version: string; fromTag: string; toRef: string;
+  repository: string; targetBranch: string; version: string; fromTag?: string; fromTagChoice?: string; toRef: string;
   configPath: string; templateRef?: string; model?: string; changelogPolicy?: string; outputDir: string; publish: boolean;
 }
 export interface Manifest {

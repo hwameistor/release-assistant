@@ -13,7 +13,8 @@ import { prepareSummary } from './summary.js';
 const help = `Release Assistant
 
 generate --repository owner/repo --target-branch release/v1.1 --version v1.1.2-alpha1
-         --from-tag v1.1.1 [--to-ref refs/heads/release/v1.1] [--publish]
+         [--from-tag v1.1.1] [--from-tag-choice latest|second-latest|third-latest]
+         [--to-ref refs/heads/release/v1.1] [--publish]
          [--config release-assistant.yml] [--template-ref refs/heads/main] [--model MODEL]
          [--changelog-policy PATH_OR_HTTPS_URL]
          [--output .release-assistant-output] [--local-config path] [--git-dir path]
@@ -23,13 +24,14 @@ release-body --repository owner/repo --version v1.1.2-alpha1
              [--notes-path changelogs/released/{version}/changelog] [--output .release-assistant-output]
 
 generate defaults to local preview. --publish persists a range snapshot and creates/updates a draft PR.
+Omit --from-tag to select one of the three highest reachable SemVer tags below the release version (default: latest).
 Credentials: GH_TOKEN or GITHUB_TOKEN; separate COPILOT_GITHUB_TOKEN or RELEASE_ASSISTANT_API_KEY.
 `;
 
 async function main(): Promise<void> {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: {
     repository: { type: 'string' }, 'target-branch': { type: 'string' }, version: { type: 'string' },
-    'from-tag': { type: 'string' }, 'to-ref': { type: 'string' }, config: { type: 'string', default: 'release-assistant.yml' },
+    'from-tag': { type: 'string' }, 'from-tag-choice': { type: 'string' }, 'to-ref': { type: 'string' }, config: { type: 'string', default: 'release-assistant.yml' },
     'template-ref': { type: 'string' }, output: { type: 'string', default: '.release-assistant-output' },
     publish: { type: 'boolean', default: false }, 'local-config': { type: 'string' }, 'git-dir': { type: 'string' },
     'head-ref': { type: 'string' }, 'notes-path': { type: 'string', default: 'changelogs/released/{version}/changelog' },
@@ -50,12 +52,16 @@ async function main(): Promise<void> {
     const targetBranch = required('target-branch');
     const git = values['git-dir'] ? new GitSource(resolve(values['git-dir'])) : await GitSource.clone(github.repository, process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN);
     try {
-      const result = await prepare({ repository: github.repository, targetBranch, version: required('version'), fromTag: required('from-tag'),
+      const result = await prepare({ repository: github.repository, targetBranch, version: required('version'), fromTag: values['from-tag'], fromTagChoice: values['from-tag-choice'],
         toRef: values['to-ref'] || `refs/heads/${targetBranch}`, configPath: values.config, templateRef: values['template-ref'],
         model: values.model, changelogPolicy: values['changelog-policy'], outputDir: values.output, publish: values.publish }, { github, git, localConfig: values['local-config'] });
       outputs.branch = result.branch;
       outputs['pull-request-url'] = result.pull?.html_url ?? '';
       outputs['output-directory'] = resolve(values.output);
+      outputs['from-tag'] = result.manifest.snapshot.fromTag;
+      outputs['from-sha'] = result.manifest.snapshot.fromSha;
+      outputs['recent-tags'] = JSON.stringify(result.manifest.snapshot.fromTagSelection?.candidates ?? []);
+      console.log(`Starting tag: ${outputs['from-tag']} (${outputs['from-sha']})`);
       console.log(result.pull ? `Updated release PR: ${result.pull.html_url}` : `Preview generated: ${resolve(values.output)}`);
       if (process.env.GITHUB_STEP_SUMMARY) {
         await appendFile(process.env.GITHUB_STEP_SUMMARY, prepareSummary(result.pull, result.manifest));

@@ -17,10 +17,17 @@ on:
         default: v1.1.2-alpha1
         required: true
         type: string
+      from_tag_choice:
+        description: Automatic starting tag when from_tag is empty (highest SemVer first)
+        default: latest
+        type: choice
+        options:
+          - latest
+          - second-latest
+          - third-latest
       from_tag:
-        description: Starting tag (exclusive)
-        default: v1.1.1
-        required: true
+        description: Optional manual starting tag; overrides automatic selection
+        required: false
         type: string
       to_ref:
         description: Ending ref (inclusive); empty uses target branch
@@ -72,6 +79,7 @@ jobs:
           RA_TARGET_BRANCH: ${{ inputs.target_branch }}
           RA_VERSION: ${{ inputs.version }}
           RA_FROM_TAG: ${{ inputs.from_tag }}
+          RA_FROM_TAG_CHOICE: ${{ inputs.from_tag_choice }}
           RA_TO_REF: ${{ inputs.to_ref }}
           RA_MODEL: ${{ inputs.model }}
           RA_CHANGELOG_POLICY: ${{ inputs.changelog_policy }}
