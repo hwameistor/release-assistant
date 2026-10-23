@@ -44,6 +44,8 @@ policy: https://github.com/hwameistor/release-assistant/blob/main/templates/chan
 
 Thereafter, edit the shared file and use **Re-run all jobs**: each run fetches its latest content while preserving the release's frozen source range and open PR. No workflow edit is needed. A URL pinned to a commit SHA deliberately keeps that revision. Native reruns retain the original URL input; change it in a new run with the same release inputs to update the same PR.
 
+After first upgrading the workflow/Action to support this option, start a new workflow run. Rerunning an older run still uses its original workflow and pinned tool version.
+
 CLI `--changelog-policy` and Action input `changelog-policy` accept a repository-relative path, a public GitHub `/blob/` or `raw.githubusercontent.com` file URL, or a directly accessible HTTPS text/Markdown URL. For local preview, relative paths resolve beside `--local-config`. External URLs must not contain credentials or query parameters; redirects, login/HTML pages, empty files and files over 128 KiB fail without falling back to a different policy. Repository and model credentials are never sent to policy hosts; GitHub ref lookups use the public API without authentication.
 
 GitHub URLs resolve to a commit SHA before the file is read. The run artifacts retain `policy.md`, `policy-source.json` and policy provenance in the local `manifest.json`; the job summary and Release PR show the source, resolved SHA when available and content hash. The committed manifest keeps its existing `policyHash` and schema, so already installed release validators remain compatible. Generic HTTPS sources are identified by their address and content hash.
