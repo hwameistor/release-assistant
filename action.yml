@@ -1,0 +1,105 @@
+name: Release Assistant
+description: Generate an evidence-backed release PR with Copilot or your model endpoint
+inputs:
+  command:
+    description: generate, validate, or release-body
+    default: generate
+  repository:
+    description: GitHub owner/repository
+    default: ${{ github.repository }}
+  target-branch:
+    description: Branch that will be released
+  version:
+    description: Release version, including optional prerelease suffix
+  from-tag:
+    description: Starting tag (exclusive)
+  to-ref:
+    description: Ending tag, branch or SHA (inclusive); defaults to target branch
+  template-ref:
+    description: Ref containing current config, policy and template; defaults to repository default branch
+  config:
+    description: Repository-owned configuration path
+    default: release-assistant.yml
+  publish:
+    description: Create or update a draft release PR
+    default: 'false'
+  head-ref:
+    description: Generated branch to validate
+  notes-path:
+    description: Reviewed version log used by release-body
+    default: changelogs/released/{version}/changelog
+  source-ref:
+    description: Exact source commit for initial publication metadata (no tag is created)
+  chart-path:
+    description: Chart.yaml to validate and read the release version from
+  output:
+    description: Local directory for generated files and evidence
+    default: .release-assistant-output
+  token:
+    description: Repository token; use an App token or PAT to trigger PR checks
+  copilot-token:
+    description: Separate Copilot credential with Copilot Requests access
+  api-key:
+    description: API key for the configured compatible model endpoint
+outputs:
+  branch:
+    description: Stable generated branch
+    value: ${{ steps.run.outputs.branch }}
+  pull-request-url:
+    description: Created or updated PR URL
+    value: ${{ steps.run.outputs.pull-request-url }}
+  output-directory:
+    description: Generated artifacts directory
+    value: ${{ steps.run.outputs.output-directory }}
+  body-path:
+    description: Local reviewed release body path
+    value: ${{ steps.run.outputs.body-path }}
+  prerelease:
+    description: Whether the release is a prerelease
+    value: ${{ steps.run.outputs.prerelease }}
+  make-latest:
+    description: Whether the release can be marked latest stable
+    value: ${{ steps.run.outputs.make-latest }}
+  version:
+    description: Canonical release version
+    value: ${{ steps.run.outputs.version }}
+  source-sha:
+    description: Exact source commit for the release
+    value: ${{ steps.run.outputs.source-sha }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: '24'
+    - name: Install pinned tool dependencies
+      shell: bash
+      env:
+        TOOL_DIRECTORY: ${{ github.action_path }}
+      run: |
+        cd "$TOOL_DIRECTORY"
+        npm ci --ignore-scripts --userconfig /dev/null
+        npm run build --userconfig /dev/null
+    - name: Run Release Assistant
+      id: run
+      shell: bash
+      env:
+        TOOL_DIRECTORY: ${{ github.action_path }}
+        RA_COMMAND: ${{ inputs.command }}
+        RA_REPOSITORY: ${{ inputs.repository }}
+        RA_TARGET_BRANCH: ${{ inputs.target-branch }}
+        RA_VERSION: ${{ inputs.version }}
+        RA_FROM_TAG: ${{ inputs.from-tag }}
+        RA_TO_REF: ${{ inputs.to-ref }}
+        RA_TEMPLATE_REF: ${{ inputs.template-ref }}
+        RA_CONFIG: ${{ inputs.config }}
+        RA_PUBLISH: ${{ inputs.publish }}
+        RA_HEAD_REF: ${{ inputs.head-ref }}
+        RA_NOTES_PATH: ${{ inputs.notes-path }}
+        RA_SOURCE_REF: ${{ inputs.source-ref }}
+        RA_CHART_PATH: ${{ inputs.chart-path }}
+        RA_OUTPUT: ${{ inputs.output }}
+        GH_TOKEN: ${{ inputs.token }}
+        COPILOT_GITHUB_TOKEN: ${{ inputs.copilot-token }}
+        RELEASE_ASSISTANT_API_KEY: ${{ inputs.api-key }}
+      run: node "$TOOL_DIRECTORY/scripts/action.mjs"

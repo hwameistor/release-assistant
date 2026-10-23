@@ -1,0 +1,14 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const directory = await mkdtemp(join(tmpdir(), 'release-preview-config-'));
+try {
+  const path = join(directory, 'config.yml');
+  await writeFile(path, JSON.stringify({ schemaVersion: 1, language: 'English', ai: { provider: 'copilot', model: process.env.RA_MODEL }, output: { charts: [] } }));
+  execFileSync(process.execPath, ['dist/cli.js', 'generate', '--local-config', path,
+    '--repository', process.env.RA_REPOSITORY, '--target-branch', process.env.RA_TARGET_BRANCH,
+    '--version', process.env.RA_VERSION, '--from-tag', process.env.RA_FROM_TAG,
+    '--to-ref', process.env.RA_TO_REF || `refs/heads/${process.env.RA_TARGET_BRANCH}`], { stdio: 'inherit' });
+} catch (error) { process.exitCode = typeof error.status === 'number' ? error.status : 1; }
+finally { await rm(directory, { recursive: true, force: true }); }

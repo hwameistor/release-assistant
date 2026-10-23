@@ -1,0 +1,71 @@
+name: Preview release notes
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Public source repository
+        default: hwameistor/hwameistor-operator
+        required: true
+        type: string
+      target_branch:
+        description: Branch containing the selected changes
+        default: release/v1.1
+        required: true
+        type: string
+      version:
+        description: Version label for this preview
+        default: v1.1.2-alpha1
+        required: true
+        type: string
+      from_tag:
+        description: Starting tag (exclusive)
+        default: v1.1.1
+        required: true
+        type: string
+      to_ref:
+        description: Ending ref (inclusive); empty uses target branch
+        type: string
+      model:
+        description: Copilot model enabled for your account
+        default: gpt-4.1
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts && npm run build
+      - name: Restore frozen range on rerun
+        if: github.run_attempt > 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "release-preview-$GITHUB_RUN_ID" --dir .release-assistant-output
+      - name: Generate read-only Copilot preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          RA_REPOSITORY: ${{ inputs.repository }}
+          RA_TARGET_BRANCH: ${{ inputs.target_branch }}
+          RA_VERSION: ${{ inputs.version }}
+          RA_FROM_TAG: ${{ inputs.from_tag }}
+          RA_TO_REF: ${{ inputs.to_ref }}
+          RA_MODEL: ${{ inputs.model }}
+        run: node scripts/preview.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: release-preview-${{ github.run_id }}
+          path: .release-assistant-output/
+          include-hidden-files: true
+          overwrite: true
+          if-no-files-found: ignore

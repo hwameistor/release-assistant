@@ -1,0 +1,9 @@
+schemaVersion: 1
+language: English
+ai:
+  provider: compatible
+  model: your-model-name
+  baseUrl: https://your-model.example/v1
+  timeoutSeconds: 180
+output:
+  charts: []
