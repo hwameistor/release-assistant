@@ -8,6 +8,7 @@ import { prepare } from './prepare.js';
 import { releaseBody } from './release.js';
 import { validateRelease } from './validate.js';
 import { writeOutput } from './storage.js';
+import { prepareSummary } from './summary.js';
 
 const help = `Release Assistant
 
@@ -57,12 +58,7 @@ async function main(): Promise<void> {
       outputs['output-directory'] = resolve(values.output);
       console.log(result.pull ? `Updated release PR: ${result.pull.html_url}` : `Preview generated: ${resolve(values.output)}`);
       if (process.env.GITHUB_STEP_SUMMARY) {
-        const source = result.manifest.policySource;
-        await appendFile(process.env.GITHUB_STEP_SUMMARY,
-          `<details>\n<summary>Changelog policy</summary>\n\n` +
-          `Source (${source.kind}): \`${source.location.replaceAll('`', '%60')}\`\n\n` +
-          (source.sha ? `Resolved commit: \`${source.sha}\`\n\n` : '') +
-          `SHA-256: \`${result.manifest.policyHash}\`\n\nThe exact policy is included in the run artifacts.\n\n</details>\n`);
+        await appendFile(process.env.GITHUB_STEP_SUMMARY, prepareSummary(result.pull, result.manifest));
       }
     } finally { await git.close(); }
   } else if (command === 'validate') {

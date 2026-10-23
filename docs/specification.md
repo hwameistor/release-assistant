@@ -81,6 +81,8 @@
 ## 7. GitHub 集成
 
 - 新增 Prepare release 工作流；支持用户指定版本、分支、from-tag、to-ref。
+- 成功创建或更新 Release PR 后，运行摘要首部展示可点击的 PR 链接；Action 和示例工作流的 prepare job 通过 `pull-request-url` 输出同一地址。预览模式不得显示已创建 PR。
+- PR 描述直接展示独立版本 Changelog 的完整渲染内容，不再调用模型摘要；生成来源和重跑说明折叠在正文之后。重跑同步覆盖 PR 描述和生成文件，保留同一 PR 链接。
 - Release PR 校验快照是否过期、版本字段及生成文件是否正确。
 - 修改 `Chart.yaml` 的 Release PR 合并后继续触发现有构建流程。
 - 本次生成的版本日志写入 `changelogs/released/<version>/changelog`。现有 GitHub Release 正文生成方式保持原状；后续若接入该文件，必须复用已评审内容，不能在发布时再次调用 AI。

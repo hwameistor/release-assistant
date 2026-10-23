@@ -41,8 +41,11 @@ concurrency:
 jobs:
   prepare:
     runs-on: ubuntu-latest # Or a trusted self-hosted runner; no GPU needed.
+    outputs:
+      pull-request-url: ${{ steps.release.outputs.pull-request-url }}
     steps:
       - uses: hwameistor/release-assistant@main # Replace main with a reviewed full commit SHA.
+        id: release
         with:
           target-branch: ${{ inputs.target_branch }}
           version: ${{ inputs.version }}

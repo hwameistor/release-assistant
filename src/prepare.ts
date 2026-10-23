@@ -145,11 +145,12 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
     await github.advanceRef(branch, head!, next);
     pull = await github.upsertPull(latestPull, branch, options.targetBranch, `chore(release): ${options.version}`,
       `Prepare **${options.version}** for \`${options.targetBranch}\`.\n\n` +
+      releaseNotes + '\n<details>\n<summary>Generation details</summary>\n\n' +
       `Source range: [${snapshot.fromSha.slice(0, 7)}…${snapshot.toSha.slice(0, 7)}](https://github.com/${options.repository}/compare/${snapshot.fromSha}...${snapshot.toSha}).\n\n` +
       `Configuration/template revision: \`${templateSha}\`. Provider: ${config.ai.provider}; model: ${config.ai.model}.\n\n` +
       `Policy source (${policySource.kind}): \`${policySource.location.replaceAll('`', '%60')}\`${policySource.sha ? ` at \`${policySource.sha}\`` : ''}. SHA-256: \`${hash(policy)}\`.\n\n` +
-      `Review the generated notes and excluded changes in \`${manifestPath}\`. Re-run all jobs regenerates this PR and overwrites generated files, including manual edits.\n\n` +
-      `This PR does not create a tag or publish images. The existing release workflow runs after approval and merge.`);
+      `Review the generated notes and excluded changes in \`${manifestPath}\`. Re-run all jobs regenerates this PR and replaces its description and generated files, including manual edits.\n\n` +
+      `This PR does not create a tag or publish images. The existing release workflow runs after approval and merge.\n\n</details>\n`);
   }
   return { branch, pull, manifest };
 }

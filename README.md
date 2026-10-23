@@ -10,7 +10,9 @@ The product contract is in [docs/specification.md](docs/specification.md). Chang
 2. Copy `templates/changelog-policy.md` and `templates/changelog.md` into that repository's `.release-assistant/` directory. Both are versioned and can be edited independently of the tool.
 3. Install [Prepare release](examples/prepare-release.yml) and [Validate release PR](examples/validate-release.yml) in `.github/workflows/`. Pin the Action to a reviewed full commit SHA. Install validation on each release branch too.
 4. Configure the credentials below. Enable the validation check and require the release branch to be up to date before merging.
-5. Run **Prepare release**, choosing the target branch, version, starting tag, optional ending ref and model. The result is a draft PR. Review its notes, excluded changes and Chart version before marking it ready.
+5. Run **Prepare release**, choosing the target branch, version, starting tag, optional ending ref and model. Open the draft PR from the link at the top of the run summary. Its description shows the full version Changelog, with generation details collapsed below. Review its notes, excluded changes and Chart version before marking it ready.
+
+The Action and the example workflow's `prepare` job expose the created or updated URL as `pull-request-url`. **Re-run all jobs** refreshes the same PR's description and generated files with the latest notes. Preview mode generates artifacts without creating or linking a release PR.
 
 For example, `target_branch=release/v1.1`, `version=v1.1.2-alpha1`, `from_tag=v1.1.1` produces notes for changes after `v1.1.1` through the resolved target HEAD. Version and range are independent inputs. Release PRs must cover the target HEAD; use preview mode for older tag-to-tag intervals.
 

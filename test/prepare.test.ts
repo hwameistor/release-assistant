@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net';
 import { fixture } from './helpers.js';
 import { prepare, statePath, manifestPath, releaseBranch } from '../src/prepare.js';
 import { validateRelease } from '../src/validate.js';
+import { prepareSummary } from '../src/summary.js';
 
 test('model override reaches inference and provenance; changing models reuses the PR and omitting it uses configuration', async t => {
   const f = await fixture(); t.after(f.close);
@@ -46,6 +47,12 @@ test('rerun refreshes model and latest template, overwrites manual notes, keeps 
   const f = await fixture(); t.after(f.close);
   const first = await prepare(f.options, f);
   const firstHead = await f.github.requiredRef('heads', first.branch);
+  const notesPath = 'changelogs/released/v1.1.2-alpha1/changelog';
+  const firstNotes = await f.github.requiredFile(notesPath, firstHead);
+  const firstBody = first.pull!.body!;
+  assert.ok(firstBody.includes(firstNotes + '\n<details>'));
+  const summary = prepareSummary(first.pull, first.manifest);
+  assert.ok(summary.startsWith(`## Release PR\n\n[Review v1.1.2-alpha1 in PR #100](${first.pull!.html_url})\n\n`));
   f.github.trees.get(firstHead)!['changelogs/released/v1.1.2-alpha1/changelog'] = 'manual edit';
   const templateSha = 'f'.repeat(40);
   f.github.trees.set(templateSha, { ...f.github.trees.get(f.to), 'template.md': '## {{version}}\n\nNew template\n\n{{sections}}' });
@@ -58,6 +65,10 @@ test('rerun refreshes model and latest template, overwrites manual notes, keeps 
   assert.deepEqual(f.github.parents.get(head), [firstHead]);
   const notes = await f.github.requiredFile('changelogs/released/v1.1.2-alpha1/changelog', head);
   assert.match(notes, /New template/); assert.match(notes, /handling 2/); assert.doesNotMatch(notes, /manual edit/);
+  assert.ok(second.pull!.body!.includes(notes + '\n<details>'));
+  assert.notEqual(second.pull!.body, firstBody);
+  assert.doesNotMatch(second.pull!.body!, /handling 1/);
+  assert.equal(prepareSummary(second.pull, second.manifest).split('<details>')[0], summary.split('<details>')[0]);
   assert.match(await f.github.requiredFile('Chart.yaml', head), /version: v1.2.0/);
   await validateRelease(f.github, first.branch, 'release/v1.1');
   f.github.trees.get(head)!['Chart.yaml'] += '# edited\n';
@@ -128,6 +139,9 @@ test('preview writes only local artifacts and freezes its original tag range', a
   assert.match(await readFile(join(f.options.outputDir, 'files/CHANGELOG.md'), 'utf8'), /v1.1.2-alpha1/);
   assert.equal(JSON.parse(await readFile(join(f.options.outputDir, 'manifest.json'), 'utf8')).snapshot.toSha, f.to);
   assert.equal(result.pull, undefined);
+  const summary = prepareSummary(result.pull, result.manifest);
+  assert.match(summary, /No pull request was created/);
+  assert.doesNotMatch(summary, /Review .* in PR|\/pull\//);
 });
 
 test('invalid output, uncovered sources and oversized prompts never create a release PR', async t => {
