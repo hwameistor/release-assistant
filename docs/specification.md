@@ -60,6 +60,9 @@
 ## 6. 模型与执行位置
 
 - 默认支持 Copilot，以独立的 `COPILOT_GITHUB_TOKEN` 认证；模型名称可配置。
+- Prepare release 和 Preview release notes 提供五项模型下拉选择，依次为 `gpt-6.1-sol`（默认）、`gpt-6-astra`、`gemini-4-argon`、`gpt-5.3-codex`、`gemini-3.8-flash`。实际可用性取决于 provider 和账号；展示顺序不代表自动降级顺序。
+- 优先级为工作流 `model` / CLI `--model` 高于配置 `ai.model`。模型名原样传给当前 provider，记录到 manifest 和 PR；工具不限制为下拉列表中的五项。
+- Re-run all jobs 保留原先选择的模型；更换模型需使用相同发布输入发起新执行，复用同一未合并 PR 和冻结范围，不改变现有重跑规则。
 - 支持 OpenAI-compatible Chat Completions 端点，以独立 API key 认证；不借用发布凭据。
 - 支持 GitHub 托管 runner、自有 runner 和本地 CLI。自有机器调用云端模型不要求 GPU。
 - 固定工具依赖版本，不依赖宿主机随机安装的 Copilot 版本。

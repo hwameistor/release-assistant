@@ -35,7 +35,7 @@ export type Snapshot = z.infer<typeof snapshotSchema>;
 export interface Provider { generate(prompt: string, schema: object): Promise<unknown> }
 export interface GenerateOptions {
   repository: string; targetBranch: string; version: string; fromTag: string; toRef: string;
-  configPath: string; templateRef?: string; outputDir: string; publish: boolean;
+  configPath: string; templateRef?: string; model?: string; outputDir: string; publish: boolean;
 }
 export interface Manifest {
   snapshot: Snapshot; templateSha: string; generatedAt: string;

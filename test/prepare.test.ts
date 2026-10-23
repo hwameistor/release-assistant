@@ -2,9 +2,45 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { fixture } from './helpers.js';
 import { prepare, statePath, manifestPath, releaseBranch } from '../src/prepare.js';
 import { validateRelease } from '../src/validate.js';
+
+test('model override reaches inference and provenance; changing models reuses the PR and omitting it uses configuration', async t => {
+  const f = await fixture(); t.after(f.close);
+  const requested: string[] = [];
+  const server = createServer(async (request, response) => {
+    let body = ''; for await (const chunk of request) body += chunk;
+    const data = JSON.parse(body); requested.push(data.model);
+    const notes = await f.provider.generate(data.messages[0].content);
+    response.writeHead(200, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(notes) } }] }));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const tree = f.github.trees.get(f.to)!;
+  tree['release-assistant.yml'] = tree['release-assistant.yml']!.replace('https://model.example/v1', `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`);
+  const config = tree['release-assistant.yml'];
+  let firstPull: number | undefined;
+  for (const model of ['gpt-6.1-sol', 'custom-model-outside-dropdown', undefined]) {
+    const result = await prepare({ ...f.options, model }, { ...f, provider: undefined });
+    const expected = model ?? 'fixture-model';
+    firstPull ??= result.pull?.number;
+    assert.equal(result.pull?.number, firstPull);
+    assert.equal(requested.at(-1), expected);
+    assert.equal(result.manifest.model, expected);
+    assert.ok(result.pull?.body?.includes(`model: ${expected}.`));
+    assert.equal(result.manifest.snapshot.toSha, f.to);
+    const head = await f.github.requiredRef('heads', result.branch);
+    assert.equal(JSON.parse(await f.github.requiredFile(manifestPath, head)).model, expected);
+    await validateRelease(f.github, result.branch, f.options.targetBranch);
+  }
+  assert.equal(f.github.pulls.length, 1);
+  assert.equal(requested.length, 3);
+  assert.equal(tree['release-assistant.yml'], config);
+});
 
 test('rerun refreshes model and latest template, overwrites manual notes, keeps range and same PR with normal commits', async t => {
   const f = await fixture(); t.after(f.close);

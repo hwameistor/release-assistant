@@ -27,9 +27,15 @@ on:
         type: string
       model:
         description: Copilot model enabled for your account
-        default: gpt-4.1
         required: true
-        type: string
+        default: gpt-6.1-sol
+        type: choice
+        options:
+          - gpt-6.1-sol
+          - gpt-6-astra
+          - gemini-4-argon
+          - gpt-5.3-codex
+          - gemini-3.8-flash
 permissions:
   contents: read
   actions: read

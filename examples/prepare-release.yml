@@ -18,6 +18,17 @@ on:
       to_ref:
         description: Ending ref (inclusive); empty means target branch HEAD
         type: string
+      model:
+        description: Model for release notes (overrides ai.model)
+        required: true
+        default: gpt-6.1-sol
+        type: choice
+        options:
+          - gpt-6.1-sol
+          - gpt-6-astra
+          - gemini-4-argon
+          - gpt-5.3-codex
+          - gemini-3.8-flash
 permissions:
   contents: read
 concurrency:
@@ -34,6 +45,7 @@ jobs:
           from-tag: ${{ inputs.from_tag }}
           to-ref: ${{ inputs.to_ref }}
           template-ref: refs/heads/main
+          model: ${{ inputs.model }}
           publish: 'true'
           token: ${{ secrets.RELEASE_ASSISTANT_TOKEN }}
           copilot-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}

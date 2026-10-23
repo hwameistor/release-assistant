@@ -17,6 +17,8 @@ inputs:
     description: Ending tag, branch or SHA (inclusive); defaults to target branch
   template-ref:
     description: Ref containing current config, policy and template; defaults to repository default branch
+  model:
+    description: Model ID override; empty uses ai.model from the repository configuration
   config:
     description: Repository-owned configuration path
     default: release-assistant.yml
@@ -92,6 +94,7 @@ runs:
         RA_FROM_TAG: ${{ inputs.from-tag }}
         RA_TO_REF: ${{ inputs.to-ref }}
         RA_TEMPLATE_REF: ${{ inputs.template-ref }}
+        RA_MODEL: ${{ inputs.model }}
         RA_CONFIG: ${{ inputs.config }}
         RA_PUBLISH: ${{ inputs.publish }}
         RA_HEAD_REF: ${{ inputs.head-ref }}

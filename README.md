@@ -10,15 +10,23 @@ The product contract is in [docs/specification.md](docs/specification.md). Chang
 2. Copy `templates/changelog-policy.md` and `templates/changelog.md` into that repository's `.release-assistant/` directory. Both are versioned and can be edited independently of the tool.
 3. Install [Prepare release](examples/prepare-release.yml) and [Validate release PR](examples/validate-release.yml) in `.github/workflows/`. Pin the Action to a reviewed full commit SHA. Install validation on each release branch too.
 4. Configure the credentials below. Enable the validation check and require the release branch to be up to date before merging.
-5. Run **Prepare release**, choosing the target branch, version, starting tag and optional ending ref. The result is a draft PR. Review its notes, excluded changes and Chart version before marking it ready.
+5. Run **Prepare release**, choosing the target branch, version, starting tag, optional ending ref and model. The result is a draft PR. Review its notes, excluded changes and Chart version before marking it ready.
 
 For example, `target_branch=release/v1.1`, `version=v1.1.2-alpha1`, `from_tag=v1.1.1` produces notes for changes after `v1.1.1` through the resolved target HEAD. Version and range are independent inputs. Release PRs must cover the target HEAD; use preview mode for older tag-to-tag intervals.
 
 The generated PR updates only the configured cumulative Changelog, version log, Chart `version`/`appVersion`, and `.release-assistant/{snapshot,manifest}.json`. Dependency and tool image versions, including JuiceFS, are not changed.
 
+## Select a model
+
+Prepare release and Preview release notes offer five choices in this order: `gpt-6.1-sol` (default), `gpt-6-astra`, `gemini-4-argon`, `gpt-5.3-codex`, and `gemini-3.8-flash`. This is a selection order, not an automatic fallback chain. Availability depends on the configured provider and account.
+
+The Action's optional `model` input and CLI `--model` override `ai.model` for that run. Without an override, the latest repository configuration supplies the model. The selected ID reaches the configured provider unchanged and is recorded in the manifest and PR body. CLI/configuration accept other model IDs, including those exposed by a custom endpoint; the five-item dropdown is not a tool allowlist. Provider errors fail the job without silently selecting another model.
+
 ## Regenerate with Re-run jobs
 
 Use **Re-run all jobs** on the original workflow run. Every rerun calls the model again and reads the latest configuration, policy and template from `template-ref` (default: the repository's default branch).
+
+GitHub retains the original workflow inputs on rerun, including the selected model, which takes precedence over `ai.model`. To compare another model, start a new run with the same release inputs and a different model. It updates the same open PR and reuses the frozen source range while the target remains current.
 
 The same repository, target branch and version reuse one PR. **Generated files are replaced, including manual edits to those files.** Each update adds a normal commit, so previous results remain in history. The first range snapshot is stored before inference: an initial model failure does not lose it. PR creation failure can also be retried.
 

@@ -81,6 +81,10 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
   }
   if (!await git.ancestor(snapshot.fromSha, snapshot.toSha) || !await git.ancestor(snapshot.toSha, snapshot.targetSha)) throw new Error('Invalid range ancestry');
   const { config, policy, template, sha: templateSha } = await materials(github, options, dependencies.localConfig);
+  if (options.model !== undefined) {
+    if (!options.model.trim() || /[\x00-\x1f\x7f]/.test(options.model)) throw new Error('Invalid model override');
+    config.ai.model = options.model;
+  }
   const paths = outputPaths(config, options.version);
   if (previous?.generatedPaths.length && sameRange && json(paths) !== json(previous.generatedPaths)) {
     throw new Error('Output paths changed for an existing release; keep paths fixed while rerunning');
