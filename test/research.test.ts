@@ -113,6 +113,14 @@ test('shorthand issue references must be investigated and link depth bounds exte
   assert.doesNotThrow(() => r.assertInvestigated());
   assert.match((await call(r, 'pull_request', { repository: 'other/storage', number: 9 })).error, /outside/);
 });
+test('provider diagnostics exclude arbitrary response messages and stacks', () => {
+  const r = new Research(snapshot, evidence, limits);
+  r.recordDiagnostic('research', { errorType: 'query', statusCode: 400, providerErrorParam: 'response_format',
+    message: 'secret-token-response', stack: 'private-evidence' } as any);
+  const saved = JSON.stringify(r.artifact());
+  assert.match(saved, /response_format/);
+  assert.ok(!saved.includes('secret-token-response') && !saved.includes('private-evidence'));
+});
 test('research artifacts survive generation failure and no release PR is published', async () => {
   const f = await fixture();
   try {

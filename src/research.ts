@@ -28,7 +28,7 @@ export const findingsSchema = z.object({
     userProblem: z.string().min(1),
     implementation: z.string().min(1),
     outcome: z.string().min(1),
-    evidenceUrls: z.array(z.string().url()).min(1),
+    evidenceUrls: z.array(z.string().min(1)).min(1),
     limitations: z.array(z.string()),
     needsReview: z.boolean(),
   }).strict()).min(1),
@@ -55,6 +55,7 @@ export class Research {
   private failure?: string;
   private closed = false;
   private findings?: z.infer<typeof findingsSchema>;
+  private diagnostics: object[] = [];
   private sourceIds: Set<string>;
   private queue: Promise<unknown> = Promise.resolve();
   constructor(readonly snapshot: Snapshot, evidence: Evidence, readonly limits: ResearchLimits,
@@ -259,9 +260,15 @@ Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
     if ([...this.sourceIds].some(id => !covered.has(id))) throw new Error('Research findings do not account for every release change');
     this.findings = report;
   }
+  recordDiagnostic(phase: string, data: { errorType?: string; errorCode?: string; statusCode?: number; providerErrorType?: string; providerErrorParam?: string }): void {
+    // Never retain model response bodies, arbitrary messages, stacks or credential-bearing URLs.
+    const label = (value?: string) => value && /^[a-zA-Z0-9_.\[\]-]{1,120}$/.test(value) ? value : undefined;
+    this.diagnostics.push({ phase, errorType: label(data.errorType), errorCode: label(data.errorCode), statusCode: data.statusCode,
+      providerErrorType: label(data.providerErrorType), providerErrorParam: label(data.providerErrorParam) });
+  }
   async close(): Promise<void> { this.closed = true; await this.queue; }
   artifact(): object {
     return { schemaVersion: 1, snapshot: this.snapshot, limits: this.limits, calls: this.calls, returnedBytes: this.bytes,
-      requiredTargets: [...this.required.values()], findings: this.findings, records: this.records };
+      requiredTargets: [...this.required.values()], findings: this.findings, diagnostics: this.diagnostics, records: this.records };
   }
 }
