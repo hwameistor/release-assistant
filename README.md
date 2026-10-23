@@ -78,7 +78,7 @@ Add `--publish` when you want to create/update the draft PR. Only this mode writ
 
 ## Publishing and limits
 
-The generation tool does not merge PRs, create tags, build images or publish releases. [docs/integration.md](docs/integration.md) describes how the reviewed log connects to HwameiStor's publication workflows. The separate [publication companion](examples/publish-chart.py) is copied into the consuming repository's existing release CI and runs only after merge; it creates the Release with correct prerelease flags and safely reuses existing Chart assets on retries.
+The generation tool does not merge PRs, create tags, build images or publish releases. The current integration adds Prepare/Validate workflows and repository configuration; merging a generated Release PR follows the existing publication workflow and triggers. [docs/integration.md](docs/integration.md) also discusses optional, separately reviewed changes for reusing the notes as the GitHub Release body and controlling prerelease/latest flags. The [publication companion](examples/publish-chart.py) is a reference for those future changes and is not installed by the current integration.
 
 The first version fails explicitly if commit count or prompt bytes exceed configured limits; it does not silently truncate or claim full coverage. You can raise the limit for a model with sufficient context or narrow the range. PR diffs are deduplicated while individual commit provenance is retained. GitHub's 300-file comparison limit also fails closed during release-branch validation.
 

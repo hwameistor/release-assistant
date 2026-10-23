@@ -6,9 +6,9 @@
 
 - 独立仓库 `hwameistor/release-assistant`，提供 TypeScript CLI 和 GitHub Action。
 - 核心产物是可审阅的 Release PR，更新版本日志、总 Changelog 和配置声明的 Chart 版本。
-- 两个业务仓库通过配置复用工具。发布阶段复用现有流程，读取已审阅日志，不再调用 AI。
+- 两个业务仓库通过配置复用工具。当前接入仅增加 Release PR 生成和校验，合并后继续按原发布工作流执行，不修改其触发条件或发布行为。
 - 工具不自动合并 PR，不创建或覆盖发布 tag，不构建或发布镜像。
-- 业务仓库原发布 CI 可以使用独立的发布伴随脚本读取已评审日志、设置预发布属性、核对已有资产；该脚本不由生成命令调用。
+- 如需将已评审日志接入 GitHub Release 正文、设置预发布属性或核对已有资产，应作为独立发布改造另行审阅；生成流程不依赖这些改造。
 
 ## 2. 输入和版本
 
@@ -55,7 +55,7 @@
 - 相同输入重跑不推进统计截止 SHA；改模板不能隐式带入新提交。
 - 显式改变 from/to 输入的新执行可重新确定范围，仍更新同一个未合并 PR；目标版本或分支改变则属于另一发布。
 - 发布目标分支比快照前进时，校验应报过期，要求使用新输入更新范围，不偷偷扩大本次范围。
-- 发布 PR 模式在专用生成分支保存快照；dry-run 保存本地状态，Actions 示例保存运行产物。
+- 发布 PR 模式在专用生成分支保存快照；dry-run 保存本地状态，预览工作流使用独立缓存保存范围，运行产物用于查看结果。
 
 ## 6. 模型与执行位置
 
@@ -71,7 +71,7 @@
 - 新增 Prepare release 工作流；支持用户指定版本、分支、from-tag、to-ref。
 - Release PR 校验快照是否过期、版本字段及生成文件是否正确。
 - 修改 `Chart.yaml` 的 Release PR 合并后继续触发现有构建流程。
-- GitHub Release 正文来自 `changelogs/released/<version>/changelog`。
+- 本次生成的版本日志写入 `changelogs/released/<version>/changelog`。现有 GitHub Release 正文生成方式保持原状；后续若接入该文件，必须复用已评审内容，不能在发布时再次调用 AI。
 - HwameiStor 与 Operator 独立 PR；X.Y 对齐，补丁号可独立维护。
 - 所有网络写入必须在显式发布 PR 模式下执行；dry-run 不写 GitHub。
 
