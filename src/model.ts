@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { PolicySource } from './policy.js';
 
 export const categories = ['breaking', 'features', 'fixes', 'changes', 'documentation', 'maintenance'] as const;
 export const notesSchema = z.object({
@@ -35,10 +36,11 @@ export type Snapshot = z.infer<typeof snapshotSchema>;
 export interface Provider { generate(prompt: string, schema: object): Promise<unknown> }
 export interface GenerateOptions {
   repository: string; targetBranch: string; version: string; fromTag: string; toRef: string;
-  configPath: string; templateRef?: string; model?: string; outputDir: string; publish: boolean;
+  configPath: string; templateRef?: string; model?: string; changelogPolicy?: string; outputDir: string; publish: boolean;
 }
 export interface Manifest {
   snapshot: Snapshot; templateSha: string; generatedAt: string;
   policyHash: string; templateHash: string; provider: string; model: string;
+  policySource: PolicySource;
   notes: Notes; evidence: Evidence;
 }

@@ -54,4 +54,6 @@ The example deliberately describes the Operator's migration-check flag and defau
 
 Edit `templates/changelog.md` for layout and `templates/changelog-policy.md` for editorial rules. Installed repositories own their copies under `.release-assistant/`; changing the bundled defaults does not overwrite those copies. Policy v3 retains the v2 layout, renderer and JSON schema.
 
+Repositories can instead use a shared public policy file through the optional workflow `changelog_policy` input or a URL in the configuration's `policy` setting. See [shared policy configuration](../README.md#use-a-shared-changelog-policy). Each run reads the configured source again and records the exact content; editing the shared file does not require workflow changes.
+
 Use the tool repository's **Preview release notes** workflow to preview bundled templates against a fixed range. It checks out the workflow run's commit, so use a new run after changing these defaults. An installed **Prepare release** rerun instead reads the latest configured template ref and updates the same release PR, subject to the existing frozen-range checks.

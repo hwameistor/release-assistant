@@ -11,6 +11,7 @@ import { notesSchema, snapshotSchema, type GenerateOptions, type Manifest, type 
 import { providerFor } from './providers.js';
 import { renderNotes, updateChangelog, updateChart, validateNotes } from './render.js';
 import { readOutput, writeOutput } from './storage.js';
+import { loadPolicy, type PolicySource } from './policy.js';
 
 export const statePath = '.release-assistant/snapshot.json';
 export const manifestPath = '.release-assistant/manifest.json';
@@ -38,16 +39,17 @@ function assertCurrent(snapshot: Snapshot, target: string): void {
 async function assertUnpublished(github: GitHub, version: string): Promise<void> {
   if (await github.ref('tags', version) || await github.ref('tags', version.slice(1))) throw new Error(`Release tag already exists: ${version}`);
 }
-async function materials(github: GitHub, options: GenerateOptions, localConfig?: string): Promise<{ config: Config; policy: string; template: string; sha: string }> {
+async function materials(github: GitHub, options: GenerateOptions, localConfig?: string, policyFetch?: typeof fetch): Promise<{ config: Config; policy: string; policySource: PolicySource; template: string; sha: string }> {
   if (localConfig && options.publish) throw new Error('Local configuration is only supported in preview mode');
   const sha = localConfig ? 'local' : await github.resolve(options.templateRef ?? `refs/heads/${await github.defaultBranch()}`);
   const config = loadConfig(localConfig ? await readFile(localConfig, 'utf8') : await github.requiredFile(safePath(options.configPath), sha));
   const read = async (configured: string | undefined, fallback: string) => configured
     ? localConfig ? readFile(resolve(dirname(localConfig), safePath(configured)), 'utf8') : github.requiredFile(configured, sha)
     : readFile(new URL(`../templates/${fallback}`, import.meta.url), 'utf8');
-  return { config, policy: await read(config.policy, 'changelog-policy.md'), template: await read(config.template, 'changelog.md'), sha };
+  const policy = await loadPolicy(options.changelogPolicy?.trim() || config.policy, { github, configSha: sha, localConfig, fetcher: policyFetch });
+  return { config, policy: policy.text, policySource: policy.source, template: await read(config.template, 'changelog.md'), sha };
 }
-export interface PrepareDependencies { github: GitHub; git: GitSource; provider?: Provider; now?: () => Date; localConfig?: string }
+export interface PrepareDependencies { github: GitHub; git: GitSource; provider?: Provider; now?: () => Date; localConfig?: string; policyFetch?: typeof fetch }
 export async function prepare(input: GenerateOptions, dependencies: PrepareDependencies): Promise<{ branch: string; pull?: Pull; manifest: Manifest }> {
   const { github, git } = dependencies;
   const options = { ...input, version: normalizeVersion(input.version), fromTag: input.fromTag.replace(/^refs\/tags\//, '') };
@@ -80,7 +82,7 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
     if (snapshot.toSha !== target) throw new Error('A Release PR must end at the target branch HEAD; use preview mode for historical tag ranges');
   }
   if (!await git.ancestor(snapshot.fromSha, snapshot.toSha) || !await git.ancestor(snapshot.toSha, snapshot.targetSha)) throw new Error('Invalid range ancestry');
-  const { config, policy, template, sha: templateSha } = await materials(github, options, dependencies.localConfig);
+  const { config, policy, policySource, template, sha: templateSha } = await materials(github, options, dependencies.localConfig, dependencies.policyFetch);
   if (options.model !== undefined) {
     if (!options.model.trim() || /[\x00-\x1f\x7f]/.test(options.model)) throw new Error('Invalid model override');
     config.ai.model = options.model;
@@ -102,6 +104,8 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
     head = next;
   }
   await writeOutput(options.outputDir, 'snapshot.json', json(snapshot));
+  await writeOutput(options.outputDir, 'policy.md', policy);
+  await writeOutput(options.outputDir, 'policy-source.json', json({ ...policySource, sha256: hash(policy) }));
   const evidence = await collect(git, github, snapshot, config.limits.maxCommits);
   const schema = z.toJSONSchema(notesSchema);
   const prompt = [
@@ -122,8 +126,11 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
   };
   for (const path of paths.slice(2)) files[path] = updateChart(await github.requiredFile(path, snapshot.targetSha), options.version);
   const manifest: Manifest = { snapshot, templateSha, generatedAt: now().toISOString(), policyHash: hash(policy), templateHash: hash(template),
-    provider: config.ai.provider, model: config.ai.model, notes, evidence };
-  const stored = { ...manifest, evidence: undefined, sources: evidence.changes.map(change => change.id),
+    provider: config.ai.provider, model: config.ai.model, policySource, notes, evidence };
+  // Keep the committed manifest compatible with already installed validators.
+  // Full policy provenance/content is retained in run artifacts and the PR body;
+  // the existing committed policyHash identifies exactly which content was used.
+  const stored = { ...manifest, evidence: undefined, policySource: undefined, sources: evidence.changes.map(change => change.id),
     files: Object.fromEntries(Object.entries(files).map(([path, content]) => [path, hash(content)])) };
   files[manifestPath] = json(stored);
   files[statePath] = json(snapshot);
@@ -139,7 +146,8 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
     pull = await github.upsertPull(latestPull, branch, options.targetBranch, `chore(release): ${options.version}`,
       `Prepare **${options.version}** for \`${options.targetBranch}\`.\n\n` +
       `Source range: [${snapshot.fromSha.slice(0, 7)}…${snapshot.toSha.slice(0, 7)}](https://github.com/${options.repository}/compare/${snapshot.fromSha}...${snapshot.toSha}).\n\n` +
-      `Policy/template revision: \`${templateSha}\`. Provider: ${config.ai.provider}; model: ${config.ai.model}.\n\n` +
+      `Configuration/template revision: \`${templateSha}\`. Provider: ${config.ai.provider}; model: ${config.ai.model}.\n\n` +
+      `Policy source (${policySource.kind}): \`${policySource.location.replaceAll('`', '%60')}\`${policySource.sha ? ` at \`${policySource.sha}\`` : ''}. SHA-256: \`${hash(policy)}\`.\n\n` +
       `Review the generated notes and excluded changes in \`${manifestPath}\`. Re-run all jobs regenerates this PR and overwrites generated files, including manual edits.\n\n` +
       `This PR does not create a tag or publish images. The existing release workflow runs after approval and merge.`);
   }

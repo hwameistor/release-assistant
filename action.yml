@@ -19,6 +19,8 @@ inputs:
     description: Ref containing current config, policy and template; defaults to repository default branch
   model:
     description: Model ID override; empty uses ai.model from the repository configuration
+  changelog-policy:
+    description: Optional policy path or public HTTPS file URL; empty uses repository configuration
   config:
     description: Repository-owned configuration path
     default: release-assistant.yml
@@ -95,6 +97,7 @@ runs:
         RA_TO_REF: ${{ inputs.to-ref }}
         RA_TEMPLATE_REF: ${{ inputs.template-ref }}
         RA_MODEL: ${{ inputs.model }}
+        RA_CHANGELOG_POLICY: ${{ inputs.changelog-policy }}
         RA_CONFIG: ${{ inputs.config }}
         RA_PUBLISH: ${{ inputs.publish }}
         RA_HEAD_REF: ${{ inputs.head-ref }}

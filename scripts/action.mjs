@@ -6,7 +6,7 @@ if (!['generate', 'validate', 'release-body'].includes(command)) throw new Error
 const args = [fileURLToPath(new URL('../dist/cli.js', import.meta.url)), command];
 const flags = { repository: 'REPOSITORY', 'target-branch': 'TARGET_BRANCH', version: 'VERSION', 'from-tag': 'FROM_TAG',
   'to-ref': 'TO_REF', 'template-ref': 'TEMPLATE_REF', config: 'CONFIG', 'head-ref': 'HEAD_REF', 'notes-path': 'NOTES_PATH',
-  'source-ref': 'SOURCE_REF', 'chart-path': 'CHART_PATH', model: 'MODEL', output: 'OUTPUT' };
+  'source-ref': 'SOURCE_REF', 'chart-path': 'CHART_PATH', model: 'MODEL', 'changelog-policy': 'CHANGELOG_POLICY', output: 'OUTPUT' };
 for (const [flag, key] of Object.entries(flags)) {
   const value = process.env[`RA_${key}`];
   if (value) args.push(`--${flag}`, value);

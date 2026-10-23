@@ -36,6 +36,10 @@ on:
           - gemini-4-argon
           - gpt-5.3-codex
           - gemini-3.8-flash
+      changelog_policy:
+        description: 'Advanced (optional): policy path or public HTTPS file URL; empty uses defaults'
+        required: false
+        type: string
 permissions:
   contents: read
   actions: read
@@ -70,6 +74,7 @@ jobs:
           RA_FROM_TAG: ${{ inputs.from_tag }}
           RA_TO_REF: ${{ inputs.to_ref }}
           RA_MODEL: ${{ inputs.model }}
+          RA_CHANGELOG_POLICY: ${{ inputs.changelog_policy }}
         run: node scripts/preview.mjs
       - name: Preserve range even when inference fails
         if: always() && steps.range-cache.outputs.cache-hit != 'true' && hashFiles('.release-assistant-output/snapshot.json') != ''

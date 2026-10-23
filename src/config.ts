@@ -10,6 +10,19 @@ export function safePath(value: string): string {
   }
   return value;
 }
+export function policyReference(value: string): string {
+  if (/[\x00-\x1f\x7f]/.test(value)) throw new Error('Invalid Changelog policy reference');
+  const reference = value.trim();
+  if (/^[a-z][a-z0-9+.-]*:/i.test(reference)) {
+    const url = new URL(reference);
+    if (url.protocol !== 'https:' || url.username || url.password || url.search) {
+      throw new Error('Policy URLs must use HTTPS without credentials or query parameters');
+    }
+    url.hash = '';
+    return url.href;
+  }
+  return safePath(reference);
+}
 const configSchema = z.object({
   schemaVersion: z.literal(1),
   language: z.string().default('English'),
@@ -33,7 +46,7 @@ const configSchema = z.object({
 export type Config = z.infer<typeof configSchema>;
 export function loadConfig(text: string): Config {
   const config = configSchema.parse(parse(text));
-  if (config.policy) safePath(config.policy);
+  if (config.policy) config.policy = policyReference(config.policy);
   if (config.template) safePath(config.template);
   if (config.ai.provider === 'compatible' && !config.ai.baseUrl) throw new Error('compatible provider requires ai.baseUrl');
   return config;

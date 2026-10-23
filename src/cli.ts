@@ -14,6 +14,7 @@ const help = `Release Assistant
 generate --repository owner/repo --target-branch release/v1.1 --version v1.1.2-alpha1
          --from-tag v1.1.1 [--to-ref refs/heads/release/v1.1] [--publish]
          [--config release-assistant.yml] [--template-ref refs/heads/main] [--model MODEL]
+         [--changelog-policy PATH_OR_HTTPS_URL]
          [--output .release-assistant-output] [--local-config path] [--git-dir path]
 validate --repository owner/repo --target-branch release/v1.1 --head-ref release-assistant/...
 release-body --repository owner/repo --version v1.1.2-alpha1
@@ -31,7 +32,7 @@ async function main(): Promise<void> {
     'template-ref': { type: 'string' }, output: { type: 'string', default: '.release-assistant-output' },
     publish: { type: 'boolean', default: false }, 'local-config': { type: 'string' }, 'git-dir': { type: 'string' },
     'head-ref': { type: 'string' }, 'notes-path': { type: 'string', default: 'changelogs/released/{version}/changelog' },
-    'source-ref': { type: 'string' }, 'chart-path': { type: 'string' }, model: { type: 'string' },
+    'source-ref': { type: 'string' }, 'chart-path': { type: 'string' }, model: { type: 'string' }, 'changelog-policy': { type: 'string' },
     help: { type: 'boolean', short: 'h' },
   } });
   if (values.help || !positionals.length) { console.log(help); return; }
@@ -50,11 +51,19 @@ async function main(): Promise<void> {
     try {
       const result = await prepare({ repository: github.repository, targetBranch, version: required('version'), fromTag: required('from-tag'),
         toRef: values['to-ref'] || `refs/heads/${targetBranch}`, configPath: values.config, templateRef: values['template-ref'],
-        model: values.model, outputDir: values.output, publish: values.publish }, { github, git, localConfig: values['local-config'] });
+        model: values.model, changelogPolicy: values['changelog-policy'], outputDir: values.output, publish: values.publish }, { github, git, localConfig: values['local-config'] });
       outputs.branch = result.branch;
       outputs['pull-request-url'] = result.pull?.html_url ?? '';
       outputs['output-directory'] = resolve(values.output);
       console.log(result.pull ? `Updated release PR: ${result.pull.html_url}` : `Preview generated: ${resolve(values.output)}`);
+      if (process.env.GITHUB_STEP_SUMMARY) {
+        const source = result.manifest.policySource;
+        await appendFile(process.env.GITHUB_STEP_SUMMARY,
+          `<details>\n<summary>Changelog policy</summary>\n\n` +
+          `Source (${source.kind}): \`${source.location.replaceAll('`', '%60')}\`\n\n` +
+          (source.sha ? `Resolved commit: \`${source.sha}\`\n\n` : '') +
+          `SHA-256: \`${result.manifest.policyHash}\`\n\nThe exact policy is included in the run artifacts.\n\n</details>\n`);
+      }
     } finally { await git.close(); }
   } else if (command === 'validate') {
     await validateRelease(github, required('head-ref'), required('target-branch'));

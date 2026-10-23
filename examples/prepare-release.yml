@@ -29,6 +29,10 @@ on:
           - gemini-4-argon
           - gpt-5.3-codex
           - gemini-3.8-flash
+      changelog_policy:
+        description: 'Advanced (optional): policy path or public HTTPS file URL; empty uses defaults'
+        required: false
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -46,6 +50,7 @@ jobs:
           to-ref: ${{ inputs.to_ref }}
           template-ref: refs/heads/main
           model: ${{ inputs.model }}
+          changelog-policy: ${{ inputs.changelog_policy }}
           publish: 'true'
           token: ${{ secrets.RELEASE_ASSISTANT_TOKEN }}
           copilot-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
