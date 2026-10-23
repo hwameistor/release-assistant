@@ -93,6 +93,26 @@ test('changed PR revisions reject files instead of mixing two implementations', 
   await call(r, 'pull_request'); m.move();
   assert.match((await call(r, 'pull_request_files')).error, /revisions changed/);
 });
+test('findings must cite fetched evidence and cover only actual release source IDs', async () => {
+  const r = new Research(snapshot, evidence, limits, undefined, mock().fetcher);
+  await call(r, 'pull_request');
+  const finding = { sources: ['pr:1'], userProblem: 'Incomplete migration', implementation: 'Propagate listing errors',
+    outcome: 'Failed listing stops migration', evidenceUrls: ['https://github.com/example/storage/pull/1'], limitations: [], needsReview: false };
+  assert.throws(() => r.recordFindings({ findings: [{ ...finding, evidenceUrls: ['https://github.com/other/storage/pull/99'] }] }), /not returned/);
+  assert.throws(() => r.recordFindings({ findings: [{ ...finding, sources: ['pr:99'] }] }), /outside/);
+  r.recordFindings({ findings: [finding] });
+  assert.deepEqual((r.artifact() as any).findings.findings[0], finding);
+});
+test('shorthand issue references must be investigated and link depth bounds external follow-ups', async () => {
+  const shorthand = structuredClone(evidence);
+  shorthand.changes[0]!.pull!.body = 'Fixes other/storage#8';
+  const r = new Research(snapshot, shorthand, { ...limits, maxDepth: 0 }, undefined, mock().fetcher);
+  await call(r, 'pull_request');
+  assert.throws(() => r.assertInvestigated(), /other\/storage\/issue\/8/);
+  await call(r, 'issue', { repository: 'other/storage', number: 8 });
+  assert.doesNotThrow(() => r.assertInvestigated());
+  assert.match((await call(r, 'pull_request', { repository: 'other/storage', number: 9 })).error, /outside/);
+});
 test('research artifacts survive generation failure and no release PR is published', async () => {
   const f = await fixture();
   try {

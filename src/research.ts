@@ -22,6 +22,17 @@ const argsSchema = z.object({
   offset: z.number().int().min(0).default(0),
 }).strict();
 type Args = z.infer<typeof argsSchema>;
+export const findingsSchema = z.object({
+  findings: z.array(z.object({
+    sources: z.array(z.string()).min(1),
+    userProblem: z.string().min(1),
+    implementation: z.string().min(1),
+    outcome: z.string().min(1),
+    evidenceUrls: z.array(z.string().url()).min(1),
+    limitations: z.array(z.string()),
+    needsReview: z.boolean(),
+  }).strict()).min(1),
+}).strict();
 type Target = { repository: string; kind: 'issue' | 'pull_request'; number: number; depth: number };
 interface Document { url: string; fetchedAt: string; content: string; sha256: string; revision?: string }
 export interface ResearchRecord {
@@ -43,9 +54,12 @@ export class Research {
   private bytes = 0;
   private failure?: string;
   private closed = false;
+  private findings?: z.infer<typeof findingsSchema>;
+  private sourceIds: Set<string>;
   private queue: Promise<unknown> = Promise.resolve();
   constructor(readonly snapshot: Snapshot, evidence: Evidence, readonly limits: ResearchLimits,
     private token?: string, private fetcher: typeof fetch = fetch) {
+    this.sourceIds = new Set(evidence.changes.map(change => change.id));
     this.revisions.set(snapshot.repository.toLowerCase(), new Set([snapshot.fromSha, snapshot.toSha]));
     for (const change of evidence.changes) {
       if (change.pull) this.allow({ repository: snapshot.repository, kind: 'pull_request', number: change.pull.number, depth: 0 }, true);
@@ -65,7 +79,7 @@ export class Research {
     }
     // GitHub shorthand can name either an issue or a PR. The issue endpoint identifies which.
     for (const match of text.matchAll(/(?:^|[\s(])(?:([\w.-]+\/[\w.-]+))?#(\d+)\b/g)) {
-      this.allow({ repository: match[1] ?? repo, kind: 'issue', number: Number(match[2]), depth });
+      this.allow({ repository: match[1] ?? repo, kind: 'issue', number: Number(match[2]), depth }, required);
       this.allow({ repository: match[1] ?? repo, kind: 'pull_request', number: Number(match[2]), depth });
     }
   }
@@ -229,9 +243,25 @@ Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
     const missing = [...this.required].filter(([id]) => !this.read.has(id)).map(([, t]) => `${t.repository}/${t.kind}/${t.number}`);
     if (missing.length) throw new Error(`Copilot did not read required release evidence: ${missing.join(', ')}`);
   }
+  recordFindings(value: unknown): void {
+    const parsed = findingsSchema.safeParse(value);
+    if (!parsed.success) throw new Error('Research findings have an invalid schema');
+    const report = parsed.data;
+    const covered = new Set<string>();
+    const urls = new Set(this.records.filter(r => r.status === 'success').map(r => (r.result as { url: string }).url));
+    for (const finding of report.findings) {
+      for (const id of finding.sources) {
+        if (!this.sourceIds.has(id)) throw new Error('Research finding cites a source outside the release range');
+        covered.add(id);
+      }
+      if (finding.evidenceUrls.some(url => !urls.has(url))) throw new Error('Research finding cites evidence not returned by a tool');
+    }
+    if ([...this.sourceIds].some(id => !covered.has(id))) throw new Error('Research findings do not account for every release change');
+    this.findings = report;
+  }
   async close(): Promise<void> { this.closed = true; await this.queue; }
   artifact(): object {
     return { schemaVersion: 1, snapshot: this.snapshot, limits: this.limits, calls: this.calls, returnedBytes: this.bytes,
-      requiredTargets: [...this.required.values()], records: this.records };
+      requiredTargets: [...this.required.values()], findings: this.findings, records: this.records };
   }
 }

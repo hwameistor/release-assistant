@@ -88,7 +88,7 @@ Use an ordinary GitHub-hosted runner, a trusted self-hosted runner, or your own 
 
 ### Autonomous Copilot research
 
-Copilot reads release PRs and linked issues itself, follows relevant discussion and companion PRs, and inspects code/tests at immutable revisions before writing notes. The initial Git range remains authoritative for what ships; external references only explain context. No successful tool calls, unread required PRs/issues or exhausted research budgets stop generation. A tool trace proves which evidence was read, not that every interpretation is correct.
+Copilot reads release PRs and linked issues itself, follows relevant discussion and companion PRs, and inspects code/tests at immutable revisions before writing notes. It first returns reviewable findings (user problem, implementation, outcome, evidence and limitations), then writes notes in the same session with further tool access. Findings must cover the release sources and cite URLs actually returned by tools. The initial Git range remains authoritative for what ships; external references only explain context. No successful tool calls, unread required PRs/issues or exhausted research budgets stop generation. A tool trace proves which evidence was read, not that every interpretation is correct.
 
 Set the calling workflow permissions to `contents: read`, `issues: read` and `pull-requests: read`. Existing publishing and Copilot secrets stay unchanged. Linked external repositories must be public; private cross-repository research is not currently supported. For direct CLI use, supply a separate read-only token through `RELEASE_ASSISTANT_READ_TOKEN` when authenticated queries are needed.
 
