@@ -31,6 +31,14 @@ Pure CI, test and refactoring changes are recorded in `excluded` with reasons ra
 
 Both the standalone version log and its block in the root Changelog receive the same rendered content. Regeneration replaces the current version's content and preserves historical versions.
 
+## Concrete example
+
+The [Operator v1.1.2-alpha1 example](../examples/changelog-operator-v1.1.2-alpha1.md) is a format demonstration, not an announcement of a published release. It uses the real range from tag `v1.1.1` (`e0b6bc166135f42c4afe5080983dd3e2e9d71949`) through `61fe6fbadf53a46e375208ca24c52af7c16c48b0` on `release/v1.1`.
+
+The [live Copilot preview](https://github.com/hwameistor/release-assistant/actions/runs/39943835943) used `gpt-6.1-sol` and the same evidence as the previous template run. The checked-in example was then edited for concision, precise configuration paths and removal of audit commentary from public prose, and rendered through the production template. It covers PRs #399 and #400; #395 and #398 remain in the preview manifest's exclusions because they only change internal CI/release automation.
+
+The example deliberately describes the Operator's migration-check flag and defaults without claiming that this repository alone proves the downstream copy tool's data-integrity behavior. Review of generated claims remains part of the release PR process.
+
 ## Editing and previewing
 
 Edit `templates/changelog.md` for layout and `templates/changelog-policy.md` for editorial rules. Installed repositories own their copies under `.release-assistant/`; changing the bundled defaults does not overwrite those copies. Template v2 uses the existing renderer and JSON schema.

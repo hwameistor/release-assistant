@@ -16,6 +16,8 @@ For example, `target_branch=release/v1.1`, `version=v1.1.2-alpha1`, `from_tag=v1
 
 The generated PR updates only the configured cumulative Changelog, version log, Chart `version`/`appVersion`, and `.release-assistant/{snapshot,manifest}.json`. Dependency and tool image versions, including JuiceFS, are not changed.
 
+See the [format rationale](docs/changelog-format.md) and [Operator example](examples/changelog-operator-v1.1.2-alpha1.md) for the default layout: actionable upgrade notes first, concise categorized changes and a full diff link. Internal-only changes remain in the audit manifest rather than the public notes.
+
 ## Select a model
 
 Prepare release and Preview release notes offer five choices in this order: `gpt-6.1-sol` (default), `gpt-6-astra`, `gemini-4-argon`, `gpt-5.3-codex`, and `gemini-3.8-flash`. This is a selection order, not an automatic fallback chain. Availability depends on the configured provider and account.
