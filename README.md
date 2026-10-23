@@ -91,3 +91,5 @@ npm run build
 ```
 
 Tests use real temporary Git histories and simulated GitHub/model services. They cover reverts, backports, merge/squash, source coverage, repeated runs, failed inference, failed PR creation, stale targets, publication guards, concurrent edits and output paths. They do not spend Copilot quota. The manual **Preview release notes** workflow provides an optional live Copilot check after its credential is configured.
+
+The preview workflow saves its range snapshot in an immutable Actions cache keyed by workflow run ID, and uploads result artifacts separately for each attempt. A rerun requires that exact snapshot; if it has expired or was never saved, start a new preview. Release PR generation persists its snapshot in the generated Git branch and does not depend on this preview cache.

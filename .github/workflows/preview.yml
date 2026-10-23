@@ -43,13 +43,17 @@ jobs:
         with:
           node-version: '24'
       - run: npm ci --ignore-scripts && npm run build
-      - name: Restore frozen range on rerun
-        if: github.run_attempt > 1
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Restore frozen range
+        id: range-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: .release-assistant-output/snapshot.json
+          key: release-preview-range-${{ github.run_id }}
+      - name: Require the original range on rerun
+        if: github.run_attempt > 1 && steps.range-cache.outputs.cache-hit != 'true'
         run: |
-          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name "release-preview-$GITHUB_RUN_ID" --dir .release-assistant-output
+          echo 'The frozen preview range is unavailable. Start a new preview; refusing to advance the range during a rerun.' >&2
+          exit 1
       - name: Generate read-only Copilot preview
         env:
           GH_TOKEN: ${{ github.token }}
@@ -61,11 +65,16 @@ jobs:
           RA_TO_REF: ${{ inputs.to_ref }}
           RA_MODEL: ${{ inputs.model }}
         run: node scripts/preview.mjs
+      - name: Preserve range even when inference fails
+        if: always() && steps.range-cache.outputs.cache-hit != 'true' && hashFiles('.release-assistant-output/snapshot.json') != ''
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: .release-assistant-output/snapshot.json
+          key: release-preview-range-${{ github.run_id }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: release-preview-${{ github.run_id }}
+          name: release-preview-${{ github.run_id }}-${{ github.run_attempt }}
           path: .release-assistant-output/
           include-hidden-files: true
-          overwrite: true
           if-no-files-found: ignore
