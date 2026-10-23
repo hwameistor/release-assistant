@@ -93,6 +93,28 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(self.package.read_bytes(), original)
         self.assertEqual(self.api.uploads, 1)
 
+    def test_binary_retry_preserves_release_metadata_and_refuses_changed_bytes(self):
+        self.publish()
+        self.api.release['assets'] = []
+        metadata = {key: value for key, value in self.api.release.items() if key != 'assets'}
+        self.package.write_bytes(b'native executable')
+        publisher.publish_binary(self.api, 'v1.1.2-alpha1', 'a' * 40, self.package)
+        publisher.publish_binary(self.api, 'v1.1.2-alpha1', 'a' * 40, self.package)
+        self.assertEqual(self.api.uploads, 2)
+        self.assertEqual({key: value for key, value in self.api.release.items() if key != 'assets'}, metadata)
+        self.package.write_bytes(b'changed native executable')
+        with self.assertRaisesRegex(ValueError, 'different content'):
+            publisher.publish_binary(self.api, 'v1.1.2-alpha1', 'a' * 40, self.package)
+        self.assertEqual(self.api.uploads, 2)
+
+    def test_binary_upload_requires_existing_release_at_same_source(self):
+        with self.assertRaisesRegex(ValueError, 'binary source'):
+            publisher.publish_binary(self.api, 'v1.1.2-alpha1', 'a' * 40, self.package)
+        self.api.sha = 'a' * 40
+        with self.assertRaisesRegex(ValueError, 'before uploading'):
+            publisher.publish_binary(self.api, 'v1.1.2-alpha1', 'a' * 40, self.package)
+        self.assertEqual((self.api.creates, self.api.uploads), (0, 0))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -43,6 +43,8 @@ node dist/cli.js release-body \
 
 发布伴随脚本在创建时设置预发布标志及 latest，重跑时核对 tag 指向、正文、预发布属性和 Chart 内容，不覆盖不同资产。Helm 打包时间戳可能变化，因此对归档的文件内容、类型、权限和链接进行比较；相同内容保留已经发布的字节，并用这些字节计算索引校验值。后续二进制和镜像任务使用 Chart 任务输出的同一版本和提交，不再用 `git describe` 推测版本。
 
+CLI 二进制使用伴随脚本的 `upload-binary` 命令附加到已经创建的 Release：校验 tag 与构建提交一致，相同字节跳过，不同字节报错。该命令不修改 Release 正文、prerelease 或 latest 属性。
+
 ## 重跑与合并保护
 
 - 普通重跑只更新同一个 Release PR；新模板、新模型、新输出覆盖旧生成文件。

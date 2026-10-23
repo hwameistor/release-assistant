@@ -91,9 +91,9 @@ def publish(api, version, source, body, prerelease, latest, package):
         raise ValueError('Exact source SHA and reviewed release notes are required')
     if prerelease != ('-' in version) or prerelease and latest:
         raise ValueError('Inconsistent prerelease/latest flags')
-    package = Path(package)
-    content = package.read_bytes()
-    digest = 'sha256:' + hashlib.sha256(content).hexdigest()
+    # Read the package before creating a release, so a missing file cannot
+    # leave an empty release behind.
+    Path(package).read_bytes()
     tag = api.tag(version)
     if tag is not None and tag != source:
         raise ValueError('Existing tag points at a different source commit')
@@ -107,6 +107,14 @@ def publish(api, version, source, body, prerelease, latest, package):
         raise ValueError('Existing release differs from the reviewed publication; refusing to overwrite it')
     if api.tag(version) != source:
         raise ValueError('Release tag changed concurrently')
+    upload_asset(api, release, package, chart=True)
+    return release['html_url']
+
+
+def upload_asset(api, release, package, chart=False):
+    package = Path(package)
+    content = package.read_bytes()
+    digest = 'sha256:' + hashlib.sha256(content).hexdigest()
     assets = release.get('assets', [])
     # A chart release has one package. Fail instead of silently missing assets if
     # a previous publisher attached more than GitHub includes in this response.
@@ -120,15 +128,26 @@ def publish(api, version, source, body, prerelease, latest, package):
             actual = 'sha256:' + hashlib.sha256(downloaded).hexdigest()
             if actual != digest:
                 try:
-                    equivalent = archive_contents(content) == archive_contents(downloaded)
+                    equivalent = chart and archive_contents(content) == archive_contents(downloaded)
                 except (tarfile.TarError, ValueError, TypeError):
                     equivalent = False
                 if not equivalent:
-                    raise ValueError('Existing chart asset has different content; refusing to overwrite it')
+                    raise ValueError('Existing release asset has different content; refusing to overwrite it')
             package.write_bytes(downloaded)
     else:
         upload = release['upload_url'].split('{', 1)[0] + '?name=' + urllib.parse.quote(package.name, safe='')
         api.request('POST', upload, content)
+
+
+def publish_binary(api, version, source, package):
+    if not re.fullmatch(r'v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?', version) or not re.fullmatch(r'[a-f0-9]{40}', source):
+        raise ValueError('Canonical version and exact source SHA are required')
+    if api.tag(version) != source:
+        raise ValueError('Existing tag does not match the binary source')
+    release = api.request('GET', '/releases/tags/' + urllib.parse.quote(version, safe=''), missing_ok=True)
+    if release is None or release['draft']:
+        raise ValueError('Publish the reviewed Chart release before uploading binaries')
+    upload_asset(api, release, package)
     return release['html_url']
 
 
@@ -139,6 +158,11 @@ def main():
             raise ValueError(key + ' must be true or false')
         return value == 'true'
     api = GitHub(os.environ['GITHUB_REPOSITORY'], os.environ['GH_TOKEN'])
+    if sys.argv[1:] == ['upload-binary']:
+        print(publish_binary(api, os.environ['RELEASE_VERSION'], os.environ['RELEASE_SHA'], os.environ['RELEASE_ASSET']))
+        return
+    if sys.argv[1:]:
+        raise ValueError('Unknown publication command')
     print(publish(api, os.environ['RELEASE_VERSION'], os.environ['RELEASE_SHA'],
                   Path(os.environ['RELEASE_NOTES']).read_text(), flag('RELEASE_PRERELEASE'),
                   flag('RELEASE_LATEST'), os.environ['CHART_PACKAGE']))
