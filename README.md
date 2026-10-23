@@ -76,6 +76,7 @@ Rerunning does not advance the source range. If the target branch has advanced, 
 | --- | --- |
 | `RELEASE_ASSISTANT_TOKEN` Action secret | GitHub App installation token or fine-grained PAT with Contents read/write and Pull requests read/write for the target repository. An App/PAT is needed if the resulting PR should trigger other Actions workflows. |
 | `COPILOT_GITHUB_TOKEN` | Separate token with Copilot Requests access and an eligible Copilot account. The tool does not fall back to the publishing credential. |
+| `research-token` Action input / `RELEASE_ASSISTANT_READ_TOKEN` CLI environment | Read-only GitHub access for Copilot's autonomous investigation. The Action defaults to `github.token`. Grant Contents, Issues and Pull requests read; do not pass the publishing PAT. Without this token the CLI uses public API access with anonymous rate limits. |
 | `RELEASE_ASSISTANT_API_KEY` | Credential for your compatible model endpoint; optional for unauthenticated local servers. |
 | `GH_TOKEN` or `GITHUB_TOKEN` CLI environment | Repository read/write credential. `GH_TOKEN` takes precedence. |
 
@@ -83,7 +84,26 @@ For Copilot credentials and billing, see GitHub's [SDK authentication](https://d
 
 Create a fine-grained PAT with **Copilot Requests** permission using your Copilot-enabled account, then save its value under **Settings → Secrets and variables → Actions → New repository secret**, named `COPILOT_GITHUB_TOKEN`, in the repository running the workflow. Creating the PAT (including selecting Public repositories) does not create this Actions secret. This repository's preview requires only the Copilot secret; its read-only GitHub access uses the built-in workflow token.
 
-Use an ordinary GitHub-hosted runner, a trusted self-hosted runner, or your own machine with Node.js 24 and Git. Calling a cloud model needs no GPU. This Action supports Linux/macOS runners. Model tools, shell access, configuration discovery and automatic context compaction are disabled. The pinned SDK includes its matching runtime; a global Copilot CLI installation is not required.
+Use an ordinary GitHub-hosted runner, a trusted self-hosted runner, or your own machine with Node.js 24 and Git. Calling a cloud model needs no GPU. This Action supports Linux/macOS runners. Copilot receives host-owned, read-only GitHub tools; shell access, arbitrary network requests, configuration discovery and automatic context compaction remain disabled. The pinned SDK includes its matching runtime; a global Copilot CLI installation is not required.
+
+### Autonomous Copilot research
+
+Copilot reads release PRs and linked issues itself, follows relevant discussion and companion PRs, and inspects code/tests at immutable revisions before writing notes. The initial Git range remains authoritative for what ships; external references only explain context. No successful tool calls, unread required PRs/issues or exhausted research budgets stop generation. A tool trace proves which evidence was read, not that every interpretation is correct.
+
+Set the calling workflow permissions to `contents: read`, `issues: read` and `pull-requests: read`. Existing publishing and Copilot secrets stay unchanged. Linked external repositories must be public; private cross-repository research is not currently supported. For direct CLI use, supply a separate read-only token through `RELEASE_ASSISTANT_READ_TOKEN` when authenticated queries are needed.
+
+`research.json` in the run artifacts records queries, returned content/chunks, URLs, retrieval times, immutable revisions and content hashes, including failed runs. It contains source material and should receive the same access controls as the source repository. On rerun, discussions are re-read and code reads stay within authorized immutable revisions; the release snapshot does not advance. Review the generated notes against this evidence before merging.
+
+Optional configuration (defaults shown):
+
+```yaml
+research:
+  maxCalls: 80
+  maxBytes: 512000
+  maxDepth: 2
+```
+
+The default model timeout is 600 seconds. Increase an explicitly configured `ai.timeoutSeconds` if a larger investigation needs more time. Compatible model endpoints retain the supplied-evidence mode; autonomous tools are currently implemented for the Copilot provider.
 
 For a custom endpoint, change `ai` in the repository configuration:
 
@@ -93,7 +113,7 @@ ai:
   model: your-model-name
   baseUrl: https://your-model.example/v1
   responseFormat: json_schema
-  timeoutSeconds: 180
+  timeoutSeconds: 600
 ```
 
 The adapter sends Chat Completions to `<baseUrl>/chat/completions`. If your server does not support structured output, choose `responseFormat: json_object` or `text`. Local validation of the returned JSON, references and coverage always runs. Provider errors, truncation and timeout fail the job; the tool never silently changes provider or uses an older response.

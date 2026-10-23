@@ -1,10 +1,13 @@
-# Changelog policy v3
+# Changelog policy v4
 
 Write for users and operators deciding whether and how to upgrade. Use the requested language.
 The output is a curated account of released behavior, not a PR inventory or implementation report.
 
 ## Scope and evidence
 
+- When GitHub research tools are available, investigate actively: read the release PRs, their linked issues and relevant discussion, then inspect implementation and tests needed to establish the solution. Follow explicit companion-PR references when a change spans repositories. Choose follow-up queries based on what you learn; do not stop at PR descriptions or the initial evidence bundle.
+- A linked issue supplies the reported scenario, symptoms and motivation. Code, tests and the final release diff establish what is actually addressed. Related upstream/companion changes are context; distinguish prerequisites and limitations from behavior shipped in this release. Multiple PRs addressing one user problem normally belong in one entry with all applicable release source IDs.
+- Without an issue, derive the previous limitation and new outcome from before/after code. A new capability or intentional default change need not be described as a bug. If evidence is insufficient, state only supported behavior and mark the interpretation for review.
 - Analyze the actual diff rather than copying PR titles or bodies. The final net diff is authoritative; backport origin PRs are context only.
 - Include notable user-visible capabilities, fixes, changed defaults and upgrade requirements. Group related changes across PRs and split unrelated outcomes from one PR when that makes the result clearer.
 - Exclude routine CI, tests, refactoring, dependency churn without demonstrated user impact and reverted work. Record every excluded source and a specific reason in excluded; never silently drop it. Include build or dependency changes when they affect installation, supported platforms, compatibility or runtime behavior.
@@ -35,6 +38,8 @@ Keep entries flat: no embedded headings, tables, lists, HTML or decorative emoji
 ## Editorial examples and final pass
 
 These examples illustrate wording only; use their claims solely when the release evidence supports them:
+- Mechanics: "Upgrade the copy tool and enable checks." Problem and outcome, only after checking the linked issue and implementation: "Volume migration could report success after failing to enumerate source files. The updated copy tool returns a failure for this case, preventing an incomplete copy from being treated as successful." If the release only configures a companion component, name that dependency and verify the relevant implementation before attributing this result to the release.
+- Multiple PRs: "Large uploads could stop permanently after a temporary network failure. Uploads now reconnect and resume from the last confirmed chunk." Cite both the reconnect fix and the resume fix when both are present in the release, instead of writing two versions of the same user problem.
 - Mechanics: "Set `--migrate-check=true` and reconcile existing DaemonSets." User outcome: "Migration checks, previously disabled by default, are now enabled for new and existing installations, so users no longer need to turn them on manually."
 - Mechanics: "Add `JUICEFS_VERSION`, preserve declaration order and set image tag `v1.2.0`." User outcome: "Select the migration binary through `localStorage.migrate.juicesync.version` to use an available version suited to your workloads without changing Operator code. The default is JuiceFS `1.2.0` in migration image `v1.2.0`."
 - Mechanics: "Change the retry loop." User outcome, only with supporting evidence: "Uploads now recover from a temporary connection failure instead of requiring users to restart the transfer."

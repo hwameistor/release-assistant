@@ -46,6 +46,9 @@ inputs:
     description: Repository token; use an App token or PAT to trigger PR checks
   copilot-token:
     description: Separate Copilot credential with Copilot Requests access
+  research-token:
+    description: Read-only GitHub credential for autonomous Copilot research; never use the publishing token
+    default: ${{ github.token }}
   api-key:
     description: API key for the configured compatible model endpoint
 outputs:
@@ -120,5 +123,6 @@ runs:
         RA_OUTPUT: ${{ inputs.output }}
         GH_TOKEN: ${{ inputs.token }}
         COPILOT_GITHUB_TOKEN: ${{ inputs.copilot-token }}
+        RELEASE_ASSISTANT_READ_TOKEN: ${{ inputs.research-token }}
         RELEASE_ASSISTANT_API_KEY: ${{ inputs.api-key }}
       run: node "$TOOL_DIRECTORY/scripts/action.mjs"

@@ -13,6 +13,8 @@
 
 需要配置 `RELEASE_ASSISTANT_TOKEN` 和 `COPILOT_GITHUB_TOKEN`，或改用兼容端点及 `RELEASE_ASSISTANT_API_KEY`。推荐 App installation token；如使用 PAT，限定目标仓库权限。模型凭据与创建 PR 的凭据分开。
 
+Copilot 主动调查使用独立的只读 GitHub 工具。Prepare 工作流声明 `contents: read`、`issues: read`、`pull-requests: read`；Action 的 `research-token` 默认使用 `github.token`，无需新增 Secret。保持 `token` 作为发布 PR 的凭据，不把它传入 `research-token`。运行产物 `research.json` 用于审阅实际查询证据；跨仓库补充资料当前仅支持明确关联的公开仓库。
+
 ## 合并和发布
 
 Release PR 内容和排除理由评审通过后，人工合并。Chart 变更按原有触发条件进入发布链路，测试 PR 应保持草稿，不能为了验证正文而触发真实产品发布。

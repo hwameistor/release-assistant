@@ -50,6 +50,8 @@ on:
 permissions:
   contents: read
   actions: read
+  issues: read
+  pull-requests: read
 jobs:
   preview:
     runs-on: ubuntu-latest
@@ -75,6 +77,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          RELEASE_ASSISTANT_READ_TOKEN: ${{ github.token }}
           RA_REPOSITORY: ${{ inputs.repository }}
           RA_TARGET_BRANCH: ${{ inputs.target_branch }}
           RA_VERSION: ${{ inputs.version }}

@@ -1,6 +1,7 @@
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { posix } from 'node:path';
+import { researchLimitsSchema } from './research.js';
 
 export function safePath(value: string): string {
   if (!value || value === '.' || /[\x00-\x1f\x7f]/.test(value) || value.includes('\\') || posix.isAbsolute(value)
@@ -36,8 +37,9 @@ const configSchema = z.object({
     provider: z.enum(['copilot', 'compatible']).default('copilot'),
     model: z.string().min(1), baseUrl: z.string().url().optional(),
     responseFormat: z.enum(['json_schema', 'json_object', 'text']).optional(),
-    timeoutSeconds: z.number().int().min(1).max(1800).default(180),
+    timeoutSeconds: z.number().int().min(1).max(1800).default(600),
   }),
+  research: researchLimitsSchema.prefault({}),
   limits: z.object({
     maxCommits: z.number().int().min(1).max(2000).default(300),
     maxPromptBytes: z.number().int().min(1000).max(2000000).default(160000),

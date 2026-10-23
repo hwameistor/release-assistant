@@ -43,6 +43,8 @@ on:
         type: string
 permissions:
   contents: read
+  issues: read
+  pull-requests: read
 concurrency:
   group: prepare-release-${{ github.repository }}-${{ inputs.target_branch }}-${{ inputs.version }}
   cancel-in-progress: false
