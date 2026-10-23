@@ -103,6 +103,18 @@ test('findings must cite fetched evidence and cover only actual release source I
   r.recordFindings({ findings: [finding] });
   assert.deepEqual((r.artifact() as any).findings.findings[0], finding);
 });
+test('PRs read through the issues API keep canonical URLs and allow discussion reads', async () => {
+  const m = mock();
+  const r = new Research(snapshot, evidence, limits, undefined, async (url, init) => {
+    if (String(url).endsWith('/issues/8')) return new Response(JSON.stringify({ number: 8, body: 'A PR', pull_request: { url: 'https://api.github.com/repos/other/storage/pulls/8' } }));
+    return m.fetcher(url, init);
+  });
+  const result = await call(r, 'issue', { repository: 'other/storage', number: 8 });
+  assert.equal(result.url, 'https://github.com/other/storage/pull/8');
+  assert.ok(!(await call(r, 'issue_comments', { repository: 'other/storage', number: 8 })).error);
+  r.recordFindings({ findings: [{ sources: ['pr:1'], userProblem: 'Problem', implementation: 'Change', outcome: 'Outcome',
+    evidenceUrls: [result.url + '#discussion_r123'], limitations: [], needsReview: true }] });
+});
 test('shorthand issue references must be investigated and link depth bounds external follow-ups', async () => {
   const shorthand = structuredClone(evidence);
   shorthand.changes[0]!.pull!.body = 'Fixes other/storage#8';

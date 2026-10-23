@@ -55,6 +55,8 @@ export class Research {
   private failure?: string;
   private closed = false;
   private findings?: z.infer<typeof findingsSchema>;
+  private rejectedFindings?: z.infer<typeof findingsSchema>;
+  private pullAliases = new Set<string>();
   private diagnostics: object[] = [];
   private sourceIds: Set<string>;
   private queue: Promise<unknown> = Promise.resolve();
@@ -66,6 +68,9 @@ export class Research {
       if (change.pull) this.allow({ repository: snapshot.repository, kind: 'pull_request', number: change.pull.number, depth: 0 }, true);
       if (change.originalPull) this.allow({ repository: snapshot.repository, kind: 'pull_request', number: change.originalPull.number, depth: 0 });
       this.discover([change.pull?.body ?? '', change.originalPull?.body ?? '', ...change.commits.map(c => c.message)].join('\n'), snapshot.repository, 0, true);
+    }
+    for (const target of this.required.values()) {
+      if (target.kind === 'pull_request') this.required.delete(key({ ...target, kind: 'issue' }));
     }
   }
   private allow(target: Target, required = false): void {
@@ -153,7 +158,8 @@ Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
     }
     if (!args.number) throw new Error('This operation requires a number');
     const kind = args.operation.startsWith('issue') ? 'issue' : 'pull_request';
-    const target = this.targets.get(key({ repository: repo, kind, number: args.number }));
+    const target = this.targets.get(key({ repository: repo, kind, number: args.number }))
+      ?? (kind === 'issue' ? this.targets.get(key({ repository: repo, kind: 'pull_request', number: args.number })) : undefined);
     if (!target && repo !== this.snapshot.repository.toLowerCase()) throw new Error('Target is outside the release repository and explicit linked references');
     return target ?? { repository: args.repository, kind, number: args.number, depth: 0 };
   }
@@ -195,14 +201,20 @@ Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
       link = `${url}/blob/${args.ref}/${args.path!.split('/').map(encodeURIComponent).join('/')}`;
     } else {
       const isPull = args.operation.startsWith('pull_request');
-      link = `${url}/${isPull ? 'pull' : 'issues'}/${args.number}`;
+      const alias = `${args.repository.toLowerCase()}:${args.number}`;
+      link = `${url}/${isPull || target?.kind === 'pull_request' || this.pullAliases.has(alias) ? 'pull' : 'issues'}/${args.number}`;
       if (args.operation === 'issue') {
         const issue = await this.get(`${root}/issues/${args.number}`);
         data = { number: issue.number, title: issue.title, body: issue.body, state: issue.state, updated_at: issue.updated_at,
           comments: issue.comments, pull_request: issue.pull_request, labels: issue.labels?.map((l: any) => l.name) };
-        if (issue.pull_request) this.allow({ ...target!, kind: 'pull_request' });
+        if (issue.pull_request) {
+          this.allow({ ...target!, kind: 'pull_request' });
+          this.pullAliases.add(alias);
+          link = `${url}/pull/${args.number}`;
+        }
         this.discover(issue.body ?? '', args.repository, target!.depth + 1);
       } else if (args.operation === 'pull_request') {
+        this.pullAliases.add(alias);
         const pull = await this.pull(args.repository, args.number!);
         this.rememberRevisions(args.repository, pull);
         data = { number: pull.number, title: pull.title, body: pull.body, state: pull.state, merged_at: pull.merged_at, updated_at: pull.updated_at,
@@ -248,17 +260,25 @@ Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
     const parsed = findingsSchema.safeParse(value);
     if (!parsed.success) throw new Error('Research findings have an invalid schema');
     const report = parsed.data;
+    this.rejectedFindings = report;
     const covered = new Set<string>();
-    const urls = new Set(this.records.filter(r => r.status === 'success').map(r => (r.result as { url: string }).url));
+    const urls = new Set(this.citationUrls());
+    const resource = (value: string) => {
+      try { const url = new URL(value); url.hash = ''; return url.href; } catch { return ''; }
+    };
     for (const finding of report.findings) {
       for (const id of finding.sources) {
         if (!this.sourceIds.has(id)) throw new Error('Research finding cites a source outside the release range');
         covered.add(id);
       }
-      if (finding.evidenceUrls.some(url => !urls.has(url))) throw new Error('Research finding cites evidence not returned by a tool');
+      if (finding.evidenceUrls.some(url => !urls.has(resource(url)))) throw new Error('Research finding cites evidence not returned by a tool');
     }
     if ([...this.sourceIds].some(id => !covered.has(id))) throw new Error('Research findings do not account for every release change');
     this.findings = report;
+    this.rejectedFindings = undefined;
+  }
+  citationUrls(): string[] {
+    return [...new Set(this.records.filter(r => r.status === 'success').map(r => (r.result as { url: string }).url))];
   }
   recordDiagnostic(phase: string, data: { errorType?: string; errorCode?: string; statusCode?: number; providerErrorType?: string; providerErrorParam?: string }): void {
     // Never retain model response bodies, arbitrary messages, stacks or credential-bearing URLs.
@@ -269,6 +289,6 @@ Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
   async close(): Promise<void> { this.closed = true; await this.queue; }
   artifact(): object {
     return { schemaVersion: 1, snapshot: this.snapshot, limits: this.limits, calls: this.calls, returnedBytes: this.bytes,
-      requiredTargets: [...this.required.values()], findings: this.findings, diagnostics: this.diagnostics, records: this.records };
+      requiredTargets: [...this.required.values()], findings: this.findings, rejectedFindings: this.rejectedFindings, diagnostics: this.diagnostics, records: this.records };
   }
 }
