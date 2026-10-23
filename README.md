@@ -35,6 +35,8 @@ Rerunning does not advance the source range. If the target branch has advanced, 
 
 For Copilot credentials and billing, see GitHub's [SDK authentication](https://docs.github.com/en/copilot/how-tos/copilot-sdk/auth/authenticate) and [Actions billing documentation](https://docs.github.com/en/copilot/concepts/agent-capabilities/agent-powered-workflows-and-operations/copilot-cli-in-github-actions). Having subscription quota alone does not configure authentication for a runner. Follow your organization's token policy.
 
+Create a fine-grained PAT with **Copilot Requests** permission using your Copilot-enabled account, then save its value under **Settings → Secrets and variables → Actions → New repository secret**, named `COPILOT_GITHUB_TOKEN`, in the repository running the workflow. Creating the PAT (including selecting Public repositories) does not create this Actions secret. This repository's preview requires only the Copilot secret; its read-only GitHub access uses the built-in workflow token.
+
 Use an ordinary GitHub-hosted runner, a trusted self-hosted runner, or your own machine with Node.js 24 and Git. Calling a cloud model needs no GPU. This Action supports Linux/macOS runners. Model tools, shell access, configuration discovery and automatic context compaction are disabled. The pinned SDK includes its matching runtime; a global Copilot CLI installation is not required.
 
 For a custom endpoint, change `ai` in the repository configuration:

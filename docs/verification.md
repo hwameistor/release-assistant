@@ -15,4 +15,18 @@
 - 最终 diff 为 30,316 字节；去重后的完整证据 JSON 为 89,922 字节，保留全部提交来源。
 - 此次只读采集没有创建源仓库 PR、tag、Release 或修改集群资源。
 
-上述模型响应测试使用本地模拟服务，不代表真实 Copilot 推理已经通过。实际 Copilot 预览需要配置 `COPILOT_GITHUB_TOKEN` 后运行 `Preview release notes`。真实 GitHub Release/Chart 索引/镜像发布未执行；发布集成 PR 必须在启用产品发布前审阅和验证。
+## 真实 Copilot 预览和重跑
+
+已配置仓库 Actions Secret `COPILOT_GITHUB_TOKEN`，使用有 Copilot Requests 权限的个人 token。
+
+- [运行 39939664002](https://github.com/hwameistor/release-assistant/actions/runs/39939664002)，工具提交 `18d98a5`，模型 `gpt-4.1`。首次执行和原生 Re-run all jobs 均成功。
+- 预览版本为 `v1.1.2-alpha1`，范围与上面的 Operator 采集一致。两次均生成 3 条摘要，覆盖全部 4 个 PR，无排除项；结构及来源校验通过。
+- 两次 `snapshot.json` 字节完全一致，SHA-256 为 `d96de8669c3c02aa6db725ac4525542e104c4c04e86bde70455bb666aeabcbf1`；输入证据也一致。
+- 生成时间分别为北京时间 2026-10-23 18:31:40、18:32:46，摘要措辞不同，确认重跑重新调用模型。
+- 最新产物为该运行的 `release-preview-39939664002-2` artifact，其中包括版本日志、完整证据和 manifest。
+
+首次尝试暴露了重跑时上次 artifact 不可用的问题。预览现使用以 run ID 为键的不可变 Actions cache 保存范围，artifact 仅用于输出。缓存丢失时重跑明确失败，不自动推进范围。正式 Release PR 的范围仍保存在 Git 分支中。
+
+内容审阅：模型归纳了环境变量配置、迁移配置和 CI 行为，而非照抄 PR 标题。但部分 JuiceFS 运行时及特殊文件行为来自 PR 描述，当前 Operator diff 不足以独立证明；模型也没有为所有这类表述设置 `needsReview`。发布前应核对这些外部组件行为，或删除无法支持的表述。结构/来源校验不代表每条 AI 解释均准确。
+
+本次真实测试为只读预览，没有创建业务 Release PR、tag 或 Release。相同 PR 更新、最新模板和失败恢复的生成器测试目前仍为本地 Git/模拟 GitHub 验证。真实 GitHub Release/Chart 索引/镜像发布未执行；发布集成 PR 必须在启用产品发布前审阅和验证。
