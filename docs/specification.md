@@ -6,9 +6,9 @@
 
 - 独立仓库 `hwameistor/release-assistant`，提供 TypeScript CLI 和 GitHub Action。
 - 核心产物是可审阅的 Release PR，更新版本日志、总 Changelog 和配置声明的 Chart 版本。
-- 两个业务仓库通过配置复用工具。当前接入仅增加 Release PR 生成和校验，合并后继续按原发布工作流执行，不修改其触发条件或发布行为。
+- 两个业务仓库通过配置复用工具。接入增加 Release PR 生成、校验和 GitHub Release 正文读取；合并后按原发布触发条件执行，正文采用本次提交中已审核的版本日志。
 - 工具不自动合并 PR，不创建或覆盖发布 tag，不构建或发布镜像。
-- 如需将已评审日志接入 GitHub Release 正文、设置预发布属性或核对已有资产，应作为独立发布改造另行审阅；生成流程不依赖这些改造。
+- 已评审日志接入 GitHub Release 正文。预发布属性和已有资产重跑保护仍是后续独立改造，生成流程不依赖这些能力。
 
 ## 2. 输入和版本
 
@@ -89,7 +89,8 @@
 - PR 描述直接展示独立版本 Changelog 的完整渲染内容，不再调用模型摘要；生成来源和重跑说明折叠在正文之后。重跑同步覆盖 PR 描述和生成文件，保留同一 PR 链接。
 - Release PR 校验快照是否过期、版本字段及生成文件是否正确。
 - 修改 `Chart.yaml` 的 Release PR 合并后继续触发现有构建流程。
-- 本次生成的版本日志写入 `changelogs/released/<version>/changelog`。现有 GitHub Release 正文生成方式保持原状；后续若接入该文件，必须复用已评审内容，不能在发布时再次调用 AI。
+- 本次生成的版本日志写入 `changelogs/released/<version>/changelog`。发布阶段从固定提交读取并验证版本、非空内容及 manifest 哈希，复制到 Chart 包内的 `RELEASE_NOTES.md`，由 Chart Releaser 直接作为 GitHub Release 正文，不能再次调用 AI。
+- 缺少版本日志或 manifest、版本/哈希不匹配、已有 tag 指向其他提交时，在发布前失败；手工发布也需准备匹配的日志及 manifest，不能仅改 Chart 版本。Chart、镜像及 CLI 产物使用相同 SHA 和版本，Operator 手工输入的 release_tag 必须与 Chart 一致。
 - HwameiStor 与 Operator 独立 PR；X.Y 对齐，补丁号可独立维护。
 - 所有网络写入必须在显式发布 PR 模式下执行；dry-run 不写 GitHub。
 

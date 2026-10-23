@@ -15,6 +15,10 @@ export async function releaseBody(github: GitHub, options: { version?: string; s
   const chart = options.chartPath ? parse(await github.requiredFile(safePath(options.chartPath), sha)) : undefined;
   const version = normalizeVersion(options.version ?? chart?.version ?? '');
   if (chart && (chart.version !== version || chart.appVersion !== version)) throw new Error('Chart version/appVersion do not match the requested release');
+  if (options.sourceRef) {
+    const existingTag = await github.ref('tags', version);
+    if (existingTag && existingTag !== sha) throw new Error('Release tag points at a different source commit');
+  }
   const path = safePath(options.notesPath.replaceAll('{version}', version));
   const content = await github.requiredFile(path, sha);
   if (!content.trim()) throw new Error('Reviewed release notes are empty');

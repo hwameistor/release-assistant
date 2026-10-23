@@ -1,6 +1,6 @@
 # HwameiStor 发布接入
 
-准备阶段增加 Release PR，合并后按现有 Chart、二进制、镜像发布工作流执行。本次接入仅安装生成和校验流程，不修改原有发布工作流、触发条件或发布行为。
+准备阶段生成可审核的 Release PR；发布阶段从本次固定提交读取已审核的版本日志，作为 GitHub Release 正文。Chart、二进制和镜像继续按原有触发条件构建，使用相同的源代码 SHA 和版本。
 
 ## 接入位置
 
@@ -15,20 +15,28 @@
 
 ## 合并和发布
 
-Release PR 内容和排除理由评审通过后，人工合并。Chart 变更按原有触发条件进入发布链路。本次接入不向发布阶段增加 manifest 门禁，也不改变手工版本更新的发布方式。测试 PR 应保持草稿，不要在无实际发布意图时合并。
+Release PR 内容和排除理由评审通过后，人工合并。Chart 变更按原有触发条件进入发布链路，测试 PR 应保持草稿，不能为了验证正文而触发真实产品发布。
 
-下面的正文接入、预发布标志和发布重跑保护是可选的后续方案，需要独立审阅和验证，不是运行 Prepare release 的前提。仅生成版本日志不会自动改变 GitHub Release 的正文。
+1. 检出发布源代码并记录完整 SHA。Operator 手动发布使用输入分支，之后的镜像任务复用该 SHA。
+2. 调用 Release Assistant 的 `release-body`，传入完整 SHA、Chart 路径；Operator 还传入手动指定的 release_tag 并核对它与 Chart 版本一致。
+3. 从该提交读取 `changelogs/released/<version>/changelog`，检查非空、Chart version/appVersion、manifest 中的仓库/版本/正文哈希，并拒绝已有版本 tag 指向另一个提交的情况。
+4. 把验证后的原文复制为 Chart 根目录的 `RELEASE_NOTES.md`。`helm/.cr/config.yaml` 配置 `release-notes-file: RELEASE_NOTES.md`，Chart Releaser 在创建 Release 时读取包内该文件作为正文。
+5. 后续镜像及 hwameictl 使用 Chart 任务输出的 SHA 和版本；上传 CLI 附件保留既有 Release 正文。
 
-`release-body` 命令读取日志并输出 `body-path`、`prerelease`、`make-latest`、`version`、`source-sha`。它本身不修改 GitHub Release。已有 tag 可以按版本读取，初次发布使用固定提交及 Chart 路径：
+GitHub Release 正文与版本日志一致，不包含 PR 中的生成详情，也不在发布时再次调用 AI 或最新模板。临时复制的日志只存在于 CI 工作区和 Chart 包中，不额外提交到仓库。历史 Release 不自动改写。
+
+发布前缺少日志或 manifest、正文哈希不符、版本不符时明确失败。**手动准备发布也要提交匹配的版本日志和 manifest，仅修改 Chart 版本已不满足新流程。** 正常使用 Prepare release 生成并审核这些文件即可；对生成结果进行修改后，应重新生成并审核。
+
+`release-body` 输出 `body-path`、`prerelease`、`make-latest`、`version`、`source-sha`，自身只读取 GitHub：
 
 ```bash
 node dist/cli.js release-body \
   --repository hwameistor/hwameistor-operator \
-  --source-ref <本次构建的完整提交SHA> \
+  --source-ref <本次发布的完整提交SHA> \
   --chart-path helm/operator/Chart.yaml
 ```
 
-若后续接入，初次发布应从本次构建的提交读取 `changelogs/released/<version>/changelog`，并将同一提交用于 tag、Chart、镜像构建；不要使用分支上再次解析得到的较新 HEAD。发布正文不能引用最新模板重新渲染，必须与评审结果一致。
+该接入保留现有 Chart Releaser 和附件上传的重试行为，未增加已有 Release 和附件的完整幂等校验。以下预发布属性和更完整的重试保护仍是独立方案。
 
 ## 后续可选：预发布兼容性
 
@@ -60,5 +68,5 @@ CLI 二进制使用伴随脚本的 `upload-binary` 命令附加到已经创建�
 1. 审阅并固定工具版本；先运行离线测试及真实历史采集。
 2. 配置推理凭据，运行真实 Copilot 预览并审阅生成质量。
 3. 安装两个仓库的 Prepare/Validate 配置与规范，生成草稿 Release PR 验证重跑。
-4. 初次接入 PR 不改 Chart 版本，不触发产品发布。真实生成的测试 Release PR 保持草稿，验证同一 PR 重跑和内容覆盖。
-5. 人工决定实际版本发布；工具不会自动合并、打 tag 或发布镜像。发布阶段如需额外接入日志或预发布控制，另提独立 PR。
+4. 接入 PR 不改 Chart 版本，不触发产品发布。验证日志读取、缺失/篡改阻断和两个实际 Chart 包内的日志内容，真实测试 Release PR 保持草稿。
+5. 人工决定实际版本发布；工具不会自动合并、打 tag 或发布镜像。发布阶段如需预发布控制或替换发布器，另行评审。
