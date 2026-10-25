@@ -4,7 +4,7 @@ The default format serves users and operators deciding whether and how to upgrad
 
 | Reference | Practice adopted |
 | --- | --- |
-| [Kubernetes v1.34](https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG/CHANGELOG-1.34.md#urgent-upgrade-notes) | Place upgrade actions before categorized changes. |
+| [Kubernetes v1.34](https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG/CHANGELOG-1.34.md#urgent-upgrade-notes) | Keep upgrade actions in a dedicated section; our default places concrete changes first. |
 | [Helm v3.19.0](https://github.com/helm/helm/releases/tag/v3.19.0) | Prioritize notable behavior changes and practical upgrade information. |
 | [GitHub CLI v2.80.0](https://github.com/cli/cli/releases/tag/v2.80.0) | Use concise categories and link changes to their PRs. |
 | [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) | Curate changes for people, group related entries, omit empty sections and put newer versions first. |
@@ -15,9 +15,9 @@ The default format serves users and operators deciding whether and how to upgrad
 ```markdown
 ## {{version}}
 
-{{upgrade_notes}}
-
 {{sections}}
+
+{{upgrade_notes}}
 
 {{compare_link}}
 ```
@@ -26,15 +26,17 @@ The default format serves users and operators deciding whether and how to upgrad
 
 Each entry states a behavior change in one or two sentences, followed by source links. Exact configuration names use inline code. Larger implementation explanations belong in the linked PR or documentation. There is no mandatory highlights block repeating a short release's entries, and no generated downloads, signatures, release date or known-issues assertions.
 
-## Explain the user problem and result
+## State the released change, then explain its context
 
-Policy v3 applies this guide to every category: **affected scenario or previous limitation → new behavior → concrete benefit or trade-off**. Fixes explain what went wrong and what now happens. Features explain a newly possible task. Changes explain the practical difference from the previous default or behavior. A default change need not be a bug fix; do not invent a defect to fit the structure.
+Policy v5 makes the categorized version log self-contained: **component + concrete addition/change/fix/removal → evidenced problem, consequence or condition where useful**. Readers must be able to tell what changed with Upgrade Notes hidden. State old and new defaults or versions, added public settings and affected scope when relevant. These facts must not disappear during compression or survive only as upgrade instructions.
 
-For example, "Set `--migrate-check=true` and reconcile existing DaemonSets" lists mechanics. Prefer "Migration checks, previously disabled by default, are now enabled for new and existing Local Storage member DaemonSets, so users no longer need to enable them manually." This explains the supported operational difference without asserting that the flag proves successful or complete verification by the downstream tool.
+For example: "Changed the default Local Storage migration-check setting from `false` to `true`; reconciliation updates `--migrate-check` on new and existing member DaemonSets." This is a factual configuration change. The opt-out belongs in Upgrade Notes; claims that the downstream tool verifies every file require separate implementation evidence. A subjective benefit such as "more reliable migration" is not a substitute for the actual change.
 
-Likewise, explain that a configurable migration binary lets users select an available version for their workloads, then give the configuration key and default version. Do not claim an image bump resolves a reported copy failure solely because a linked issue describes that failure. The relevant implementation or test evidence must support that conclusion.
+Likewise, state the migration image's old and new default tags and the added version-selection key. Briefly explain a verified companion fix and its prerequisite when relevant, without implying that changing the Operator configuration alone ships the downstream implementation. Fix entries still explain the triggering condition, previous failure and corrected behavior. Do not invent a bug or benefit to fit every intentional change.
 
-Keep only configuration details needed to act on the change. Environment declaration order, internal mappings and validation branches usually belong in linked documentation unless they explain a specific user problem. Incompatible changes still require a Breaking Changes entry even when Upgrade Notes already explain the required action.
+Keep public configuration details needed to understand what changed. Environment declaration order, internal mappings and validation branches usually belong in linked documentation unless they explain a specific user problem. Incompatible changes still require a Breaking Changes entry even when Upgrade Notes already explain the required action. A separate new configuration capability can have its own entry citing the same PR; do not repeat the same behavior under different categories.
+
+Group related PRs by outcome, not every change to one component into a single dense paragraph. Check the length and repetition of the entire public text: shrinking entries while expanding Upgrade Notes does not make the release concise. Preserve real compatibility and data-loss limitations, but do not turn missing investigation evidence into claims that the project never tested something.
 
 The default heading contains only the version: the snapshot creation date is not the eventual publication date. Custom templates can still use `{{date}}`, which means the snapshot's UTC creation date. Generation timestamps remain available in the manifest.
 
@@ -44,15 +46,15 @@ Both the standalone version log and its block in the root Changelog receive the 
 
 ## Concrete example
 
-The [Operator v1.1.2-alpha1 example](../examples/changelog-operator-v1.1.2-alpha1.md) is a format demonstration, not an announcement of a published release. It uses the real range from tag `v1.1.1` (`e0b6bc166135f42c4afe5080983dd3e2e9d71949`) through `61fe6fbadf53a46e375208ca24c52af7c16c48b0` on `release/v1.1`.
+The [Operator v1.1.2-alpha1 example](../examples/changelog-operator-v1.1.2-alpha1.md) is a format demonstration, not an announcement of a published release. It uses the real range from tag `v1.1.1` (`e0b6bc166135f42c4afe5080983dd3e2e9d71949`) through `6bb145fd0dc082f2d8ca9d77f72a8d978a65a5e8` on `release/v1.1`.
 
-The [live Copilot preview](https://github.com/hwameistor/release-assistant/actions/runs/39943835943) used `gpt-6.1-sol` and the same evidence as the previous template run. The checked-in example was then edited for concision, precise configuration paths and removal of audit commentary from public prose, and rendered through the production template. It was subsequently edited to explain the user scenario and result under policy v3; it is not unedited model output. It covers PRs #399 and #400; #395 and #398 remain in the preview manifest's exclusions because they only change internal CI/release automation.
+The example was manually revised against the frozen diff and the subsequent local Copilot investigation to demonstrate policy v5; it is not unedited model output or a new production workflow result. It covers PRs #399 and #400. The other source PRs concern internal CI/release automation and are excluded from this public example. The earlier [live Copilot preview](https://github.com/hwameistor/release-assistant/actions/runs/39943835943) is historical context, not a validation run for this revision.
 
 The example deliberately describes the Operator's migration-check flag and defaults without claiming that this repository alone proves the downstream copy tool's data-integrity behavior. Review of generated claims remains part of the release PR process.
 
 ## Editing and previewing
 
-Edit `templates/changelog.md` for layout and `templates/changelog-policy.md` for editorial rules. Installed repositories own their copies under `.release-assistant/`; changing the bundled defaults does not overwrite those copies. Policy v3 retains the v2 layout, renderer and JSON schema.
+Edit `templates/changelog.md` for layout and `templates/changelog-policy.md` for editorial rules. Installed repositories own their copies under `.release-assistant/`; changing the bundled defaults does not overwrite those copies. Policy v5 puts categorized changes before Upgrade Notes in the default template; the renderer and JSON schema are unchanged. A shared policy URL updates editorial rules only: a consumer with its own layout must update that template separately to adopt the new section order.
 
 Repositories can instead use a shared public policy file through the optional workflow `changelog_policy` input or a URL in the configuration's `policy` setting. See [shared policy configuration](../README.md#use-a-shared-changelog-policy). Each run reads the configured source again and records the exact content; editing the shared file does not require workflow changes.
 
