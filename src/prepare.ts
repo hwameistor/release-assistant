@@ -17,6 +17,7 @@ import { chooseTag, recentTags } from './tags.js';
 import { sourceRangeSummary } from './summary.js';
 import { Research } from './research.js';
 import { updateVersionFile } from './version-files.js';
+import { reuseSnapshot } from './workflow-run.js';
 
 export const statePath = '.release-assistant/snapshot.json';
 export const manifestPath = '.release-assistant/manifest.json';
@@ -39,7 +40,7 @@ function assertIdentity(snapshot: Snapshot, options: GenerateOptions): void {
   }
 }
 function assertCurrent(snapshot: Snapshot, target: string): void {
-  if (snapshot.targetSha !== target) throw new Error('Release range is stale: target branch advanced. Start a new run with an explicit new to-ref SHA; Re-run jobs preserves the original range');
+  if (snapshot.targetSha !== target) throw new Error('Release range is stale: target branch advanced. Start a new Run workflow with to-ref empty or set to the new HEAD SHA; Re-run jobs preserves the original range. Local CLI users must supply a new explicit to-ref SHA');
 }
 async function assertUnpublished(github: GitHub, version: string): Promise<void> {
   if (await github.ref('tags', version) || await github.ref('tags', version.slice(1))) throw new Error(`Release tag already exists: ${version}`);
@@ -80,8 +81,9 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
   const sameRange = previous?.toRef === options.toRef && (tagChoice
     ? previous?.fromTagSelection?.choice === tagChoice
     : !previous?.fromTagSelection && previous?.fromTag === options.fromTag);
+  const reuse = reuseSnapshot(previous, sameRange, options.workflowRun);
   let snapshot: Snapshot;
-  if (previous && sameRange) snapshot = previous;
+  if (previous && reuse) snapshot = previous;
   else {
     const toSha = await github.resolve(options.toRef);
     if (!await git.ancestor(toSha, target)) throw new Error('Invalid range ancestry');
@@ -93,6 +95,7 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
       fromSha: selected?.sha ?? await github.requiredRef('tags', options.fromTag), toSha,
       targetSha: target, createdAt: now().toISOString(), generatedPaths: [],
       ...(tagChoice ? { fromTagSelection: { choice: tagChoice, candidates: candidates! } } : {}),
+      ...(options.workflowRun ? { workflowRun: { repository: options.workflowRun.repository, runId: options.workflowRun.runId } } : {}),
     };
   }
   if (options.publish) {
@@ -107,7 +110,7 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
   }
   const paths = outputPaths(config, options.version);
   const newVersionFiles = config.output.versionFiles.filter(file => !previous?.generatedPaths.includes(file.path));
-  if (previous?.generatedPaths.length && sameRange && json(paths) !== json(previous.generatedPaths)) {
+  if (previous?.generatedPaths.length && reuse && json(paths) !== json(previous.generatedPaths)) {
     const added = new Set(newVersionFiles.map(file => file.path));
     if (json(paths.filter(path => !added.has(path))) !== json(previous.generatedPaths)) {
       throw new Error('Output paths changed for an existing release; keep paths fixed while rerunning');
@@ -128,7 +131,7 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
     versionFiles[file.path] = updateVersionFile(await github.requiredFile(file.path, snapshot.targetSha), file, options.version);
   }
   // Persist BEFORE inference so even a first-attempt model failure freezes the range.
-  if (options.publish && (!head || !sameRange)) {
+  if (options.publish && (!head || !reuse)) {
     if (head && previous) {
       const allowed = new Set([...previous.generatedPaths, statePath, manifestPath]);
       const changed = await github.changedPaths(previous.targetSha, head);

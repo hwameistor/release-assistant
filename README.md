@@ -22,7 +22,7 @@ Leave `from_tag` empty to discover the three highest SemVer tags reachable from 
 
 To specify any existing tag, including a non-SemVer baseline or one outside the three suggestions, fill in `from_tag`; it overrides `from_tag_choice` and still passes the ancestry checks. In the Action/CLI these inputs are `from-tag` / `--from-tag` and `from-tag-choice` / `--from-tag-choice`. The Action and example prepare job expose the resolved `from-tag`, `from-sha` and `recent-tags` (JSON candidates, empty for manual selection).
 
-The actual tag, commit and candidate list are frozen before inference. Re-running the same selection keeps that snapshot even if tags are added, moved or deleted. To change the starting point, start a new run with a different rank or an explicit tag. An explicit new `to_ref` refreshes the range and automatic candidates while reusing the same open Release PR.
+The actual tag, commit and candidate list are frozen before inference for each workflow run. **Re-run all jobs** keeps that snapshot even if tags are added, moved or deleted. A new **Run workflow** resolves the selected inputs again, refreshing the range and automatic candidates while reusing the same open Release PR. Leave `to_ref` empty to use the target branch HEAD; an explicit ref remains authoritative.
 
 The generated PR updates only the configured cumulative Changelog, version log, Chart `version`/`appVersion`, and `.release-assistant/{snapshot,manifest}.json`. Dependency and tool image versions, including JuiceFS, are not changed.
 
@@ -64,11 +64,11 @@ GitHub URLs resolve to a commit SHA before the file is read. The run artifacts r
 
 Use **Re-run all jobs** on the original workflow run. Every rerun calls the model again, reads the latest configuration and layout template from `template-ref` (default: the repository's default branch), and resolves the selected policy source again.
 
-GitHub retains the original workflow inputs on rerun, including the selected model, which takes precedence over `ai.model`. To compare another model, start a new run with the same release inputs and a different model. It updates the same open PR and reuses the frozen source range while the target remains current.
+GitHub retains the original workflow inputs on rerun, including the selected model, which takes precedence over `ai.model`. To compare another model, start a new run with the same release inputs and a different model. It updates the same open PR and resolves the source range again.
 
 The same repository, target branch and version reuse one PR. **Generated files are replaced, including manual edits to those files.** Each update adds a normal commit, so previous results remain in history. The first range snapshot is stored before inference: an initial model failure does not lose it. PR creation failure can also be retried.
 
-Rerunning does not advance the source range. If the target branch has advanced, start a new workflow execution and explicitly set `to_ref` to the new full commit SHA. That refreshes the range in the same open PR. Closed/merged release PRs and existing target tags stop generation. Changing output paths during an ordinary rerun is rejected; changing wording, policy or model is supported.
+Rerunning does not advance the source range. If the target branch has advanced, start a new **Run workflow** with `to_ref` empty or set to the new full commit SHA. Snapshots record the workflow repository and run ID; a retry without its original snapshot, or after a newer run replaced it, stops instead of adopting another run's range. Local CLI reruns retain their existing snapshot; use a new explicit `--to-ref` SHA to refresh it. Closed/merged release PRs and existing target tags stop generation. Changing output paths during an ordinary rerun is rejected; changing wording, policy or model is supported.
 
 ## Credentials and execution location
 

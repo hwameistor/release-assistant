@@ -20,7 +20,7 @@ export async function validateRelease(github: GitHub, headRef: string, targetBra
   if (normalizeVersion(snapshot.version) !== snapshot.version) throw new Error('Noncanonical version in release snapshot');
   const expectedBranch = releaseBranch(github.repository, targetBranch, snapshot.version);
   if (headRef.replace(/^refs\/heads\//, '') !== expectedBranch) throw new Error('Validation must use the generated release branch');
-  if (await github.requiredRef('heads', targetBranch) !== snapshot.targetSha || snapshot.toSha !== snapshot.targetSha) throw new Error('Release range is stale; regenerate with an explicit new to-ref SHA');
+  if (await github.requiredRef('heads', targetBranch) !== snapshot.targetSha || snapshot.toSha !== snapshot.targetSha) throw new Error('Release range is stale; start a new Run workflow with to-ref empty or set to the new HEAD SHA');
   if (await github.ref('tags', snapshot.version) || await github.ref('tags', snapshot.version.slice(1))) throw new Error('Release tag already exists');
   const manifest = storedManifest.parse(JSON.parse(await github.requiredFile(manifestPath, head)));
   if (JSON.stringify(manifest.snapshot) !== JSON.stringify(snapshot)) throw new Error('Manifest and snapshot differ');
