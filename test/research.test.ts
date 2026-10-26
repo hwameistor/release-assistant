@@ -44,7 +44,8 @@ test('Copilot tools can discover issues, follow companion PRs and read immutable
   await call(r, 'pull_request', { repository: 'other/storage', number: 9 });
   const file = await call(r, 'file', { repository: 'other/storage', ref: head, path: 'copy.go' });
   assert.equal(file.revision, head);
-  assert.equal(file.nextOffset, 10000);
+  assert.ok(file.nextOffset > 0 && file.nextOffset < file.totalCharacters);
+  assert.ok(Buffer.byteLength(JSON.stringify(file.content)) <= 12000);
   assert.match(file.sha256, /^[a-f0-9]{64}$/);
   assert.doesNotThrow(() => r.assertInvestigated());
   assert.equal(m.requests.find(q => q.url.endsWith('/repos/other/storage'))?.auth, undefined);
@@ -227,7 +228,7 @@ test('generation refuses a valid JSON answer when Copilot never investigated', a
   try {
     const tree = f.github.trees.get(f.to)!;
     tree['release-assistant.yml'] = tree['release-assistant.yml']!.replace('provider: compatible', 'provider: copilot');
-    await assert.rejects(prepare(f.options, f), /did not use GitHub research/);
+    await assert.rejects(prepare(f.options, { ...f, provider: { generate: async () => ({ entries: [], excluded: [] }) } }), /did not use GitHub research/);
     assert.equal(f.github.pulls.length, 0);
   } finally { await f.close(); }
 });

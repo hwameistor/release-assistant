@@ -46,5 +46,15 @@ export class GitSource {
   async commitDiff(commit: Commit): Promise<string> {
     return commit.parents[0] ? this.diff(commit.parents[0], commit.sha) : this.git(['show', '--format=', '--no-ext-diff', '--no-textconv', commit.sha, '--']);
   }
+  async file(ref: string, path: string): Promise<string> {
+    const entry = await this.git(['--literal-pathspecs', 'ls-tree', '-z', ref, '--', path]);
+    const match = /^(100644|100755) blob ([a-f0-9]{40})\t/.exec(entry);
+    if (!match) throw new Error('Frozen path is missing or is not a regular file');
+    const size = Number((await this.git(['cat-file', '-s', match[2]!])).trim());
+    if (!Number.isFinite(size) || size > 32 * 1024 * 1024) throw new Error('Frozen file exceeds the 32 MiB reader limit; no content was read');
+    const content = await this.git(['cat-file', 'blob', match[2]!]);
+    if (content.includes('\0')) throw new Error('Binary files are not supported');
+    return content;
+  }
   async close(): Promise<void> { if (this.temporary) await rm(this.directory, { recursive: true, force: true }); }
 }
