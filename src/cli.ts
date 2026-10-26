@@ -9,6 +9,7 @@ import { releaseBody } from './release.js';
 import { validateRelease } from './validate.js';
 import { writeOutput } from './storage.js';
 import { prepareSummary } from './summary.js';
+import { workflowRunFromEnv } from './workflow-run.js';
 
 const help = `Release Assistant
 
@@ -54,7 +55,8 @@ async function main(): Promise<void> {
     try {
       const result = await prepare({ repository: github.repository, targetBranch, version: required('version'), fromTag: values['from-tag'], fromTagChoice: values['from-tag-choice'],
         toRef: values['to-ref'] || `refs/heads/${targetBranch}`, configPath: values.config, templateRef: values['template-ref'],
-        model: values.model, changelogPolicy: values['changelog-policy'], outputDir: values.output, publish: values.publish }, { github, git, localConfig: values['local-config'] });
+        model: values.model, changelogPolicy: values['changelog-policy'], outputDir: values.output, publish: values.publish,
+        workflowRun: workflowRunFromEnv(process.env) }, { github, git, localConfig: values['local-config'] });
       outputs.branch = result.branch;
       outputs['pull-request-url'] = result.pull?.html_url ?? '';
       outputs['output-directory'] = resolve(values.output);
