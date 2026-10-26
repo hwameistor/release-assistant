@@ -16,6 +16,7 @@ import { loadPolicy, type PolicySource } from './policy.js';
 import { chooseTag, recentTags } from './tags.js';
 import { sourceRangeSummary } from './summary.js';
 import { Research } from './research.js';
+import { updateVersionFile } from './version-files.js';
 
 export const statePath = '.release-assistant/snapshot.json';
 export const manifestPath = '.release-assistant/manifest.json';
@@ -105,10 +106,27 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
     config.ai.model = options.model;
   }
   const paths = outputPaths(config, options.version);
+  const newVersionFiles = config.output.versionFiles.filter(file => !previous?.generatedPaths.includes(file.path));
   if (previous?.generatedPaths.length && sameRange && json(paths) !== json(previous.generatedPaths)) {
-    throw new Error('Output paths changed for an existing release; keep paths fixed while rerunning');
+    const added = new Set(newVersionFiles.map(file => file.path));
+    if (json(paths.filter(path => !added.has(path))) !== json(previous.generatedPaths)) {
+      throw new Error('Output paths changed for an existing release; keep paths fixed while rerunning');
+    }
+    // A new version file may be adopted on rerun, but must not overwrite edits
+    // in a file that the existing release PR did not previously manage.
+    if (head) for (const file of newVersionFiles) {
+      if (await github.file(file.path, head) !== await github.file(file.path, snapshot.targetSha)) {
+        throw new Error(`New version file has existing PR edits: ${file.path}`);
+      }
+    }
   }
   snapshot.generatedPaths = paths;
+  if (config.output.versionFiles.length) snapshot.versionFiles = config.output.versionFiles;
+  else delete snapshot.versionFiles;
+  const versionFiles: Record<string, string> = {};
+  for (const file of config.output.versionFiles) {
+    versionFiles[file.path] = updateVersionFile(await github.requiredFile(file.path, snapshot.targetSha), file, options.version);
+  }
   // Persist BEFORE inference so even a first-attempt model failure freezes the range.
   if (options.publish && (!head || !sameRange)) {
     if (head && previous) {
@@ -156,10 +174,11 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
     [paths[0]!]: updateChangelog(await github.file(paths[0]!, snapshot.targetSha) ?? '', options.version, releaseNotes),
     [paths[1]!]: releaseNotes,
   };
-  for (const path of paths.slice(2)) files[path] = updateChart(await github.requiredFile(path, snapshot.targetSha), options.version);
+  for (const path of config.output.charts) files[path] = updateChart(await github.requiredFile(path, snapshot.targetSha), options.version);
+  Object.assign(files, versionFiles);
   const manifest: Manifest = { snapshot, templateSha, generatedAt: now().toISOString(), policyHash: hash(policy), templateHash: hash(template),
     provider: config.ai.provider, model: config.ai.model, policySource, notes, evidence };
-  // Keep the committed manifest compatible with already installed validators.
+  // Releases without version files retain the legacy manifest shape.
   // Full policy provenance/content is retained in run artifacts and the PR body;
   // the existing committed policyHash identifies exactly which content was used.
   const stored = { ...manifest, evidence: undefined, policySource: undefined, sources: evidence.changes.map(change => change.id),
