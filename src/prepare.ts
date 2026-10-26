@@ -10,6 +10,7 @@ import { collect } from './collect.js';
 import { notesSchema, snapshotSchema, recentTagChoiceSchema, type GenerateOptions, type Manifest, type Provider, type Pull, type Snapshot } from './model.js';
 import { providerFor } from './providers.js';
 import { renderNotes, updateChangelog, updateChart, validateNotes } from './render.js';
+import { assertConciseNotes, lengthGuidance } from './concise.js';
 import { readOutput, writeOutput } from './storage.js';
 import { loadPolicy, type PolicySource } from './policy.js';
 import { chooseTag, recentTags } from './tags.js';
@@ -132,7 +133,7 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
     'Analyze behavior and impact, not merely PR titles. Use final netDiff to account for reverts. Original PRs are context only.',
     'Every change ID must appear in entries.sources or excluded.sources with a reason. Return only JSON matching the schema.',
     ...(research ? [`RESEARCH:\n${research.instructions()}`] : []),
-    `POLICY:\n${policy}`, `SCHEMA:\n${JSON.stringify(schema)}`, `EVIDENCE:\n${JSON.stringify(evidence)}`,
+    `POLICY:\n${policy}`, lengthGuidance, `SCHEMA:\n${JSON.stringify(schema)}`, `EVIDENCE:\n${JSON.stringify(evidence)}`,
   ].join('\n\n');
   await writeOutput(options.outputDir, 'evidence.json', json(evidence));
   const bytes = Buffer.byteLength(prompt);
@@ -148,6 +149,7 @@ export async function prepare(input: GenerateOptions, dependencies: PrepareDepen
     }
   }
   const notes = validateNotes(generated, evidence);
+  assertConciseNotes(notes);
   research?.markReviewRequired(notes);
   const releaseNotes = renderNotes(notes, snapshot, template);
   const files: Record<string, string> = {

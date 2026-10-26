@@ -154,3 +154,18 @@ test('invalid output, uncovered sources and oversized prompts never create a rel
   const head = await f.github.requiredRef('heads', releaseBranch(f.options.repository, f.options.targetBranch, f.options.version));
   assert.equal(await f.github.file(manifestPath, head), null);
 });
+
+
+test('overlength custom-provider output cannot publish release files or create a PR', async t => {
+  const f = await fixture(); t.after(f.close);
+  const provider = { generate: async (prompt: string) => {
+    const notes = await f.provider.generate(prompt);
+    notes.entries[0]!.summary = Array(31).fill('word').join(' ');
+    return notes;
+  } };
+  await assert.rejects(prepare(f.options, { ...f, provider }), /exceed per-item length limits/);
+  assert.equal(f.github.pulls.length, 0);
+  const head = await f.github.requiredRef('heads', releaseBranch(f.options.repository, f.options.targetBranch, f.options.version));
+  assert.ok(await f.github.file(statePath, head));
+  assert.equal(await f.github.file(manifestPath, head), null);
+});

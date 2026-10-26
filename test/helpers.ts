@@ -78,7 +78,7 @@ export async function fixture() {
     fromTag: 'v1.1.1', toRef: 'refs/heads/release/v1.1', configPath: 'release-assistant.yml', outputDir: join(directory, 'output'), publish: true };
   const provider = { generate: async (prompt: string) => {
     github.inferenceCalls++;
-    const evidence = JSON.parse(prompt.split('EVIDENCE:\n')[1]!);
+    const evidence = JSON.parse(prompt.split('EVIDENCE:\n')[1]!.split('\n\n')[0]!);
     return { entries: evidence.changes.map((change: { id: string }) => ({ category: 'fixes', summary: `Correct file handling ${github.inferenceCalls}.`,
       impact: 'Users receive the updated file.', sources: [change.id], upgradeNotes: [], needsReview: false })), excluded: [] };
   } };
