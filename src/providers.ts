@@ -6,15 +6,20 @@ import type { Config } from './config.js';
 import type { Provider } from './model.js';
 import { findingsSchema, type Research } from './research.js';
 import { z } from 'zod';
+import { composeConciseNotes, NotesLengthError } from './concise.js';
 
 export class CompatibleProvider implements Provider {
   constructor(private config: Config['ai'], private key?: string) {}
   async generate(prompt: string, schema: object): Promise<unknown> {
+    const signal = AbortSignal.timeout(this.config.timeoutSeconds * 1000);
+    return composeConciseNotes(instruction => this.request(`${prompt}\n\n${instruction}`, schema, signal));
+  }
+  private async request(prompt: string, schema: object, signal: AbortSignal): Promise<unknown> {
     const url = new URL(`${this.config.baseUrl!.replace(/\/$/, '')}/chat/completions`);
     if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('Invalid model endpoint');
     try {
       const response = await fetch(url, {
-        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(this.config.timeoutSeconds * 1000),
+        method: 'POST', redirect: 'error', signal,
         headers: { 'Content-Type': 'application/json', ...(this.key ? { Authorization: `Bearer ${this.key}` } : {}) },
         body: JSON.stringify({ model: this.config.model, messages: [{ role: 'user', content: prompt }],
           response_format: this.config.responseFormat === 'text' ? undefined : this.config.responseFormat === 'json_object' ? { type: 'json_object' }
@@ -72,15 +77,17 @@ export class CopilotProvider implements Provider {
             }
           }
           phase = 'compose';
-          const result = await session.sendAndWait({ prompt: 'Now write the final release notes using the validated findings and original editorial policy. Return only JSON matching the final notes schema. Separate WHAT CHANGED from WHAT AFFECTED USERS MUST DO. Each entry is a concise factual change statement with essential before/after values, new public settings and supported problem context. Leave impact empty unless a short qualification is necessary to understand that exact change. Do not append deployment instructions, alternate configuration routes or an inventory of findings.limitations to entries. Put required user operations and change-specific adoption warnings in upgradeNotes, with a short bold affected-user label; combine steps for the same scenario and include each action only once across all entries. Preserve important compatibility/data-loss warnings and needsReview flags, but keep unchanged general limitations and evidence-collection uncertainty in the research findings unless needed to qualify a public claim. For external fixes, name the concrete integration change and its prerequisite without claiming the fix is implemented in this repository. Group PRs serving one outcome; separate independent changes from one PR. Before returning, review the whole document for repeated facts, long entries and actions that merely restate changes. Remove internal mappings and general operational advice before compressing essential facts. Follow the policy length guidance without silently dropping changes or material warnings. Internal-only sources may be excluded with a reason. Use scoped tools if necessary.\n\nVALIDATED FINDINGS:\n' + JSON.stringify(research.findingsReport()),
-            responseSchema: schema as Record<string, unknown> }, this.config.timeoutSeconds * 1000);
-          if (!result?.data.content) throw new Error('No Copilot response');
-          return JSON.parse(result.data.content);
+          return composeConciseNotes(async instruction => {
+            const result = await session.sendAndWait({ prompt: 'Now write the final release notes using the validated findings and original editorial policy. Return only JSON matching the final notes schema. Separate WHAT CHANGED from WHAT AFFECTED USERS MUST DO. Each entry is a concise factual change statement with essential before/after values, new public settings and supported problem context. When findings establish a user-facing failure behind a fix or dependency integration, retain its specific trigger or symptom inside the entry; do not reduce it to a version/settings inventory. Leave impact empty unless a short qualification is necessary to understand that exact change. Do not append deployment instructions, alternate configuration routes or an inventory of findings.limitations to entries. Put required user operations and change-specific adoption warnings in upgradeNotes, with a short bold affected-user label; combine steps for the same scenario and include each action only once across all entries. Preserve important compatibility/data-loss warnings and needsReview flags, but keep unchanged general limitations and evidence-collection uncertainty in the research findings unless needed to qualify a public claim. For external fixes, name the concrete integration change and its prerequisite without claiming the fix is implemented in this repository. Group PRs serving one outcome; separate independent changes from one PR. Before returning, review the whole document for repeated facts, long entries and actions that merely restate changes. Remove internal mappings and general operational advice before compressing essential facts. Follow the policy length guidance without silently dropping changes or material warnings. Internal-only sources may be excluded with a reason. Use scoped tools if necessary.\n\nVALIDATED FINDINGS:\n' + JSON.stringify(research.findingsReport()) + '\n\n' + instruction,
+              responseSchema: schema as Record<string, unknown> }, this.config.timeoutSeconds * 1000);
+            if (!result?.data.content) throw new Error('No Copilot response');
+            return JSON.parse(result.data.content);
+          });
         })(),
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Copilot timeout')), this.config.timeoutSeconds * 1000); }),
       ]);
     } catch (error) {
-      if (error instanceof Error && /^(Research |Copilot did not )/.test(error.message)) throw error;
+      if (error instanceof NotesLengthError || (error instanceof Error && /^(Research |Copilot did not )/.test(error.message))) throw error;
       throw new Error(`Copilot generation failed during ${phase}; inspect research.json diagnostics and check Copilot access, model availability, quota and timeout`);
     }
     finally {

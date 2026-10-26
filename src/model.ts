@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { PolicySource } from './policy.js';
 import type { Research } from './research.js';
+import { versionFileSchema } from './version-files.js';
 
 export const categories = ['breaking', 'features', 'fixes', 'changes', 'documentation', 'maintenance'] as const;
 export const notesSchema = z.object({
@@ -35,6 +36,7 @@ export const snapshotSchema = z.object({
   fromTag: z.string(), toRef: z.string(), fromSha: z.string().regex(/^[a-f0-9]{40}$/),
   toSha: z.string().regex(/^[a-f0-9]{40}$/), targetSha: z.string().regex(/^[a-f0-9]{40}$/),
   createdAt: z.string(), generatedPaths: z.array(z.string()).default([]),
+  versionFiles: z.array(versionFileSchema).optional(),
   fromTagSelection: z.object({
     choice: recentTagChoiceSchema,
     candidates: z.array(z.object({ name: z.string(), sha: z.string().regex(/^[a-f0-9]{40}$/) })).min(1).max(3),

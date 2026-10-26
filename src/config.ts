@@ -2,6 +2,7 @@ import { parse } from 'yaml';
 import { z } from 'zod';
 import { posix } from 'node:path';
 import { researchLimitsSchema } from './research.js';
+import { versionFileSchema } from './version-files.js';
 
 export function safePath(value: string): string {
   if (!value || value === '.' || /[\x00-\x1f\x7f]/.test(value) || value.includes('\\') || posix.isAbsolute(value)
@@ -32,7 +33,8 @@ const configSchema = z.object({
     changelog: z.string().default('CHANGELOG.md'),
     releaseNotes: z.string().default('changelogs/released/{version}/changelog'),
     charts: z.array(z.string()).default([]),
-  }).default({ changelog: 'CHANGELOG.md', releaseNotes: 'changelogs/released/{version}/changelog', charts: [] }),
+    versionFiles: z.array(versionFileSchema).default([]),
+  }).default({ changelog: 'CHANGELOG.md', releaseNotes: 'changelogs/released/{version}/changelog', charts: [], versionFiles: [] }),
   ai: z.object({
     provider: z.enum(['copilot', 'compatible']).default('copilot'),
     model: z.string().min(1), baseUrl: z.string().url().optional(),
@@ -54,7 +56,8 @@ export function loadConfig(text: string): Config {
   return config;
 }
 export function outputPaths(config: Config, version: string): string[] {
-  const paths = [config.output.changelog, config.output.releaseNotes.replaceAll('{version}', version), ...config.output.charts].map(safePath);
+  const paths = [config.output.changelog, config.output.releaseNotes.replaceAll('{version}', version),
+    ...config.output.charts, ...config.output.versionFiles.map(file => file.path)].map(safePath);
   if (new Set(paths).size !== paths.length || paths.some(p => p.startsWith('.release-assistant/'))) {
     throw new Error('Output paths must be unique and outside .release-assistant/');
   }

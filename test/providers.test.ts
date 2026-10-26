@@ -28,3 +28,30 @@ test('Copilot requires an explicit inference credential instead of falling back 
   const provider = new CopilotProvider({ provider: 'copilot', model: 'configured', timeoutSeconds: 1 });
   await assert.rejects(provider.generate('prompt', {}), /COPILOT_GITHUB_TOKEN/);
 });
+
+
+test('compatible provider rewrites long notes once with the same model and schema', async t => {
+  const long = { entries: [{ category: 'fixes', summary: Array(31).fill('word').join(' '), impact: '', sources: ['pr:42'], upgradeNotes: [], needsReview: true }], excluded: [] };
+  const short = { entries: [{ ...long.entries[0], summary: 'Migration now fails when source listing fails.' }], excluded: [] };
+  const requests: any[] = [];
+  let alwaysLong = false;
+  const server = createServer(async (req, res) => {
+    let text = ''; for await (const chunk of req) text += chunk;
+    const body = JSON.parse(text); requests.push(body);
+    const corrected = requests.length % 2 === 0 && !alwaysLong;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(corrected ? short : long) } }] }));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const provider = new CompatibleProvider({ provider: 'compatible', model: 'selected-model', baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, timeoutSeconds: 2 });
+  assert.deepEqual(await provider.generate('Original evidence and policy', { type: 'object' }), short);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].model, requests[0].model);
+  assert.deepEqual(requests[1].response_format, requests[0].response_format);
+  assert.match(requests[1].messages[0].content, /Original evidence and policy/);
+  assert.match(requests[1].messages[0].content, /Rewrite the previous notes once/);
+  alwaysLong = true;
+  await assert.rejects(provider.generate('Original evidence', {}), /entries\[0\].summary\+impact: 31/);
+  assert.equal(requests.length, 4);
+});

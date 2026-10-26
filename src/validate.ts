@@ -5,6 +5,7 @@ import { safePath } from './config.js';
 import { hash, manifestPath, normalizeVersion, releaseBranch, statePath } from './prepare.js';
 import { notesSchema, snapshotSchema } from './model.js';
 import { validateNotes } from './render.js';
+import { validateVersionFile } from './version-files.js';
 
 const storedManifest = z.object({
   snapshot: snapshotSchema, templateSha: z.string().regex(/^[a-f0-9]{40}$/), generatedAt: z.string(),
@@ -31,8 +32,16 @@ export async function validateRelease(github: GitHub, headRef: string, targetBra
     const content = await github.requiredFile(safePath(path), head);
     if (hash(content) !== expected) throw new Error(`Generated file changed after validation: ${path}. Rerun generation to replace manual edits`);
   }
-  for (const path of snapshot.generatedPaths.slice(2)) {
+  const versionPaths = new Set((snapshot.versionFiles ?? []).map(file => file.path));
+  if (versionPaths.size !== (snapshot.versionFiles ?? []).length
+      || [...versionPaths].some(path => !snapshot.generatedPaths.slice(2).includes(path))) {
+    throw new Error('Version files must be unique generated files');
+  }
+  for (const path of snapshot.generatedPaths.slice(2).filter(path => !versionPaths.has(path))) {
     const chart = parse(await github.requiredFile(path, head));
     if (chart?.version !== snapshot.version || chart?.appVersion !== snapshot.version) throw new Error(`Chart version mismatch: ${path}`);
+  }
+  for (const file of snapshot.versionFiles ?? []) {
+    validateVersionFile(await github.requiredFile(safePath(file.path), head), file, snapshot.version);
   }
 }
