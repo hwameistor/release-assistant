@@ -2,9 +2,10 @@ import type { ModelInfo } from '@github/copilot-sdk';
 
 /** The SDK performs token-aware compaction. Preflight uses UTF-8 bytes as a
  * conservative estimate, not a claimed tokenizer count or a whole-release cap. */
-export function contextBudget(model: ModelInfo | undefined, initialText: string) {
-  if (!model) return { chunkBytes: 12000 };
-  const limits = model.capabilities.limits;
+export function contextBudget(model: ModelInfo | undefined, initialText: string, runtimeTokenLimit?: number) {
+  const declared = model?.capabilities.limits;
+  if (!declared && !runtimeTokenLimit) return { chunkBytes: 12000 };
+  const limits = { ...declared, max_context_window_tokens: Math.min(declared?.max_context_window_tokens ?? Infinity, runtimeTokenLimit ?? Infinity) };
   const reserve = Math.min(limits.max_output_tokens ?? 16000, 16000);
   const inputTokens = Math.min(limits.max_prompt_tokens ?? Infinity, limits.max_context_window_tokens - reserve);
   if (!Number.isFinite(inputTokens) || inputTokens < 1) throw new Error('Copilot returned unusable model context limits');

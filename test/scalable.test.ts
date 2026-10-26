@@ -144,6 +144,8 @@ test('model limits bound instructions and tool fragments independently of total 
   assert.equal(contextBudget(model, 'Instructions').chunkBytes, 7000);
   assert.throws(() => contextBudget(model, 'x'.repeat(60000)), /shorten the policy/);
   assert.equal(contextBudget(undefined, 'Instructions').chunkBytes, 12000);
+  assert.equal(contextBudget(model, 'Instructions', 40000).chunkBytes, 2400);
+  assert.throws(() => contextBudget(model, 'x'.repeat(30000), 40000), /shorten the policy/);
 });
 
 test('Copilot composes from checkpoint tools after context loss with automatic compaction enabled', async () => {
