@@ -21,19 +21,22 @@ export function validateNotes(value: unknown, evidence: Evidence): Notes {
 const headings = { breaking: 'Breaking Changes', features: 'Features', fixes: 'Fixes', changes: 'Changes', documentation: 'Documentation', maintenance: 'Maintenance' };
 const inline = (value: string) => value.replace(/[\r\n]+/g, ' ').replace(/</g, '&lt;').replace(/>/g, '&gt;').trim();
 export function renderNotes(notes: Notes, snapshot: Snapshot, template: string): string {
-  for (const required of ['version', 'sections']) if (!template.includes(`{{${required}}}`)) throw new Error(`Template must contain {{${required}}}`);
+  if (!template.includes('{{version}}')) throw new Error('Template must contain {{version}}');
+  if (!template.includes('{{sections}}') && !template.includes('{{release_changes}}')) throw new Error('Template must contain {{sections}} or {{release_changes}}');
   const links = (sources: string[]) => [...new Set(sources)].map(source => {
     const [kind, id] = source.split(':');
     return kind === 'pr' ? `[#${id}](https://github.com/${snapshot.repository}/pull/${id})`
       : `[${id!.slice(0, 7)}](https://github.com/${snapshot.repository}/commit/${id})`;
   }).join(', ');
-  const sections = categories.flatMap(category => {
+  const sections = (level: number) => categories.flatMap(category => {
     const entries = notes.entries.filter(entry => entry.category === category);
-    return entries.length ? [`### ${headings[category]}\n\n${entries.map(entry => `- ${inline(entry.summary)}${entry.impact ? ` ${inline(entry.impact)}` : ''} (${links(entry.sources)})${entry.needsReview ? ' **Needs review.**' : ''}`).join('\n')}`] : [];
+    return entries.length ? [`${'#'.repeat(level)} ${headings[category]}\n\n${entries.map(entry => `- ${inline(entry.summary)}${entry.impact ? ` ${inline(entry.impact)}` : ''} (${links(entry.sources)})${entry.needsReview ? ' **Needs review.**' : ''}`).join('\n')}`] : [];
   }).join('\n\n') || 'No user-facing changes in this range.';
-  const upgrades = notes.entries.flatMap(entry => entry.upgradeNotes);
-  const values: Record<string, string> = { version: snapshot.version, date: snapshot.createdAt.slice(0, 10), sections,
-    upgrade_notes: upgrades.length ? `### Upgrade Notes\n\n${[...new Set(upgrades)].map(note => `- ${inline(note)}`).join('\n')}` : '',
+  const upgrades = [...new Set(notes.entries.flatMap(entry => entry.upgradeNotes))].map(note => `- ${inline(note)}`).join('\n');
+  const values: Record<string, string> = { version: snapshot.version, date: snapshot.createdAt.slice(0, 10), sections: sections(3),
+    release_changes: `### Release Changes\n\n${sections(4)}`,
+    upgrade_notes: upgrades ? `### Upgrade Notes\n\n${upgrades}` : '',
+    upgrade_actions: upgrades ? `---\n\n### Upgrade Actions\n\n${upgrades}` : '',
     compare_link: `[Full diff](https://github.com/${snapshot.repository}/compare/${snapshot.fromSha}...${snapshot.toSha})` };
   return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
     if (!(key in values)) throw new Error(`Unknown template placeholder: ${key}`);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { safePath, loadConfig, outputPaths } from '../src/config.js';
@@ -39,4 +39,23 @@ test('SemVer prereleases and template validation work without duplicate changelo
   log = updateChangelog(log, snapshot.version, 'second\n');
   assert.doesNotMatch(log, /first/); assert.match(log, /second/); assert.match(log, /Historical/);
   assert.equal(log.split(':start -->').length, 2);
+});
+
+test('default layout separates release changes from optional upgrade actions and preserves legacy placeholders', async () => {
+  const snapshot = { version: 'v1.1.2', repository: 'example/storage', fromSha: 'a'.repeat(40), toSha: 'b'.repeat(40), createdAt: '2026-10-25' } as Snapshot;
+  const notes = { entries: [{ category: 'changes' as const, summary: 'Enable migration checks by default.', impact: '', sources: ['pr:42'],
+    upgradeNotes: ['**Checks intentionally disabled:** set `check=false`.'], needsReview: true }], excluded: [] };
+  const template = await readFile(new URL('../templates/changelog.md', import.meta.url), 'utf8');
+  const rendered = renderNotes(notes, snapshot, template);
+  assert.match(rendered, /### Release Changes\n\n#### Changes\n\n- Enable migration checks by default\./);
+  assert.match(rendered, /\*\*Needs review\.\*\*\n\n---\n\n### Upgrade Actions\n\n- \*\*Checks intentionally disabled:\*\*/);
+  assert.ok(rendered.indexOf('### Release Changes') < rendered.indexOf('### Upgrade Actions'));
+  assert.equal(rendered.split('set `check=false`').length, 2);
+  const legacy = renderNotes(notes, snapshot, '## {{version}}\n\n{{upgrade_notes}}\n\n{{sections}}\n\n{{compare_link}}');
+  assert.match(legacy, /### Upgrade Notes/); assert.match(legacy, /### Changes/);
+  assert.doesNotMatch(legacy, /Release Changes|Upgrade Actions|---/);
+  notes.entries[0]!.upgradeNotes = [];
+  const withoutActions = renderNotes(notes, snapshot, template);
+  assert.match(withoutActions, /### Release Changes/);
+  assert.doesNotMatch(withoutActions, /Upgrade Actions|---/);
 });
