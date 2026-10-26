@@ -84,26 +84,28 @@ For Copilot credentials and billing, see GitHub's [SDK authentication](https://d
 
 Create a fine-grained PAT with **Copilot Requests** permission using your Copilot-enabled account, then save its value under **Settings → Secrets and variables → Actions → New repository secret**, named `COPILOT_GITHUB_TOKEN`, in the repository running the workflow. Creating the PAT (including selecting Public repositories) does not create this Actions secret. This repository's preview requires only the Copilot secret; its read-only GitHub access uses the built-in workflow token.
 
-Use an ordinary GitHub-hosted runner, a trusted self-hosted runner, or your own machine with Node.js 24 and Git. Calling a cloud model needs no GPU. This Action supports Linux/macOS runners. Copilot receives host-owned, read-only GitHub tools; shell access, arbitrary network requests, configuration discovery and automatic context compaction remain disabled. The pinned SDK includes its matching runtime; a global Copilot CLI installation is not required.
+Use an ordinary GitHub-hosted runner, a trusted self-hosted runner, or your own machine with Node.js 24 and Git. Calling a cloud model needs no GPU. This Action supports Linux/macOS runners. Copilot receives host-owned, read-only GitHub tools; shell access, arbitrary network requests and configuration discovery remain disabled. Automatic context compaction is enabled in an isolated session; saved findings and policy remain available through scoped tools. The pinned SDK includes its matching runtime; a global Copilot CLI installation is not required.
 
 ### Autonomous Copilot research
 
-Copilot reads release PRs and linked issues itself, follows relevant discussion and companion PRs, and inspects code/tests at immutable revisions before writing notes. It first returns reviewable findings (user problem, implementation, outcome, evidence and limitations), then writes notes in the same session with further tool access. Findings must cover the release sources and cite URLs actually returned by tools. The initial Git range remains authoritative for what ships; external references only explain context. No successful tool calls, unread required PRs/issues or exhausted research budgets stop generation. A tool trace proves which evidence was read, not that every interpretation is correct.
+Copilot reads release PRs and linked issues itself, follows relevant discussion and companion PRs, and inspects code/tests at immutable revisions before writing notes. Its initial prompt contains the policy and evidence navigation instructions, not the full release diff. It reads complete evidence in bounded pages, saves reviewable findings (user problem, implementation, outcome, evidence and limitations) incrementally, then writes notes with further tool access. Related PRs must be reconciled against the complete final diff; provisional findings can be replaced when later changes alter the outcome. Findings must cover the release sources and cite URLs actually returned by tools. The initial Git range remains authoritative for what ships; external references only explain context. No successful tool calls, unread required PRs/issues, incomplete source metadata or final-diff coverage, and exhausted research budgets stop generation. Reading only the first fragment does not satisfy coverage; deletion-only changes are retained. A tool trace proves which evidence was read, not that every interpretation is correct.
 
 Required auxiliary references that Copilot actually requests and receives HTTP 404/410 for are recorded as unavailable, never as successful reads or citations. For example, prose such as `companion PR #1869` resolves in the current repository and may point to a missing issue. Copilot can investigate correctly qualified references it discovers; the host retains the unavailable reference in the affected findings, marks them for review, and preserves review flags on resulting Changelog entries. Use full GitHub URLs or `owner/repository#number` to avoid ambiguity. Source PRs must still be read successfully; authentication failures, rate limits, server errors and failed repository lookups do not satisfy required reads.
 
 Set the calling workflow permissions to `contents: read`, `issues: read` and `pull-requests: read`. Existing publishing and Copilot secrets stay unchanged. Linked external repositories must be public; private cross-repository research is not currently supported. For direct CLI use, supply a separate read-only token through `RELEASE_ASSISTANT_READ_TOKEN` when authenticated queries are needed.
 
-`research.json` in the run artifacts records queries, returned content/chunks, URLs, retrieval times, immutable revisions and content hashes, including failed runs. It contains source material and should receive the same access controls as the source repository. On rerun, discussions are re-read and code reads stay within authorized immutable revisions; the release snapshot does not advance. Review the generated notes against this evidence before merging.
+`research-progress.json` checkpoints the latest findings and coverage after evidence/notebook operations. It supports inspection after interruption; rerunning starts a fresh investigation rather than reusing potentially stale findings. `research.json` in the run artifacts records queries, returned content/chunks, URLs, retrieval times, immutable revisions and content hashes, including failed runs. It contains source material and should receive the same access controls as the source repository. On rerun, discussions are re-read and code reads stay within authorized immutable revisions; the release snapshot does not advance. Review the generated notes against this evidence before merging.
 
 Optional configuration (defaults shown):
 
 ```yaml
 research:
-  maxCalls: 80
-  maxBytes: 512000
+  maxCalls: 300
+  maxBytes: 4000000
   maxDepth: 2
 ```
+
+The call and returned-byte budgets cover both GitHub reads and local evidence/notebook tools. Explicit existing budgets are preserved. `limits.maxPromptBytes` caps only the initial instructions and policy for Copilot; it still caps the entire supplied prompt for compatible endpoints. The SDK handles context compaction using model token limits, separately from total research budgets. Frozen source files are read from Git objects (up to 32 MiB per file), avoiding GitHub Contents inline-size limits.
 
 The default model timeout is 600 seconds. Increase an explicitly configured `ai.timeoutSeconds` if a larger investigation needs more time. Compatible model endpoints retain the supplied-evidence mode; autonomous tools are currently implemented for the Copilot provider.
 

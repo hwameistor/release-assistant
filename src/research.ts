@@ -3,12 +3,13 @@ import { posix } from 'node:path';
 import { z } from 'zod';
 import type { Tool } from '@github/copilot-sdk';
 import type { Evidence, Notes, Snapshot } from './model.js';
+import { EvidenceStore, fragment } from './evidence.js';
 
 const repository = z.string().regex(/^[\w.-]+\/[\w.-]+$/);
 const sha = /^[a-f0-9]{40}$/i;
 export const researchLimitsSchema = z.object({
-  maxCalls: z.number().int().min(1).max(1000).default(80),
-  maxBytes: z.number().int().min(10000).max(4000000).default(512000),
+  maxCalls: z.number().int().min(1).max(5000).default(300),
+  maxBytes: z.number().int().min(10000).max(100000000).default(4000000),
   maxDepth: z.number().int().min(0).max(5).default(2),
 });
 export type ResearchLimits = z.infer<typeof researchLimitsSchema>;
@@ -33,6 +34,17 @@ export const findingsSchema = z.object({
     needsReview: z.boolean(),
   }).strict()).min(1),
 }).strict();
+const findingSchema = findingsSchema.shape.findings.element;
+type Finding = z.infer<typeof findingSchema>;
+const evidenceArgs = z.object({
+  operation: z.enum(['index', 'read', 'status']), documentId: z.string().max(200).optional(),
+  page: z.number().int().min(1).max(10000).default(1), offset: z.number().int().min(0).default(0),
+}).strict();
+const notebookArgs = z.object({
+  operation: z.enum(['save', 'list', 'read', 'remove']),
+  id: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/).optional(), finding: findingSchema.optional(),
+  page: z.number().int().min(1).max(10000).default(1), offset: z.number().int().min(0).default(0),
+}).strict();
 type Target = { repository: string; kind: 'issue' | 'pull_request'; number: number; depth: number };
 class ResearchHttpError extends Error {
   constructor(readonly status: number, readonly path: string) {
@@ -42,7 +54,7 @@ class ResearchHttpError extends Error {
 type UnavailableReference = Target & { status: number; sources: string[] };
 interface Document { url: string; fetchedAt: string; content: string; sha256: string; revision?: string }
 export interface ResearchRecord {
-  arguments: Args | { invalid: true }; status: 'success' | 'error'; result: unknown;
+  arguments: Args | Record<string, unknown>; status: 'success' | 'error'; result: unknown;
 }
 const key = (target: Pick<Target, 'repository' | 'kind' | 'number'>) => `${target.repository.toLowerCase()}:${target.kind}:${target.number}`;
 
@@ -69,8 +81,16 @@ export class Research {
   private diagnostics: object[] = [];
   private sourceIds: Set<string>;
   private queue: Promise<unknown> = Promise.resolve();
+  readonly evidence: EvidenceStore;
+  private notebook = new Map<string, Finding>();
+  private chunkBytes = 12000;
+  private progress?: () => Promise<void>;
+  private documentReads = new Map<string, [number, number][]>();
+  private policy?: string;
   constructor(readonly snapshot: Snapshot, evidence: Evidence, readonly limits: ResearchLimits,
-    private token?: string, private fetcher: typeof fetch = fetch) {
+    private token?: string, private fetcher: typeof fetch = fetch,
+    private sourceFile?: (ref: string, path: string) => Promise<string>) {
+    this.evidence = new EvidenceStore(snapshot, evidence);
     this.sourceIds = new Set(evidence.changes.map(change => change.id));
     this.revisions.set(snapshot.repository.toLowerCase(), new Set([snapshot.fromSha, snapshot.toSha]));
     for (const change of evidence.changes) {
@@ -85,6 +105,9 @@ export class Research {
     for (const target of this.required.values()) {
       if (target.kind === 'pull_request') this.required.delete(key({ ...target, kind: 'issue' }));
     }
+    this.evidence.add('targets', 'Required GitHub reads and initially linked references',
+      `https://github.com/${snapshot.repository}/compare/${snapshot.fromSha}...${snapshot.toSha}`,
+      JSON.stringify({ required: [...this.required.values()], linked: [...this.targets.values()] }));
   }
   private allow(target: Target, required = false, source?: string): void {
     if (target.depth > this.limits.maxDepth) return;
@@ -111,19 +134,126 @@ export class Research {
   }
   instructions(): string {
     return `You are an investigating release editor. Actively use github_research to read PRs and linked issues, then follow relevant discussions, companion PRs, changed files and tests as needed. Do not merely restate the pre-collected evidence.
-Read every required target below before finalizing. If a GitHub shorthand reference is ambiguous, read it as an issue first; its pull_request field identifies a PR. Issue reports establish symptoms, not proof of a fix. Compare actual code and tests with the frozen netDiff to establish what this release changes. External PRs and other revisions are context, never additional shipped source IDs.
+Read every required target in the targets document before finalizing. If a GitHub shorthand reference is ambiguous, read it as an issue first; its pull_request field identifies a PR. Issue reports establish symptoms, not proof of a fix. Compare actual code and tests with the frozen netDiff to establish what this release changes. External PRs and other revisions are context, never additional shipped source IDs.
 Source PRs must be read successfully. A required auxiliary reference returning HTTP 404/410 is recorded as unavailable, not read evidence: do not repeatedly retry or cite it. Investigate correctly qualified references if available, document the limitation and qualify the affected findings. The host marks affected sources for review. Authentication, rate-limit and server failures do not satisfy required reads.
 When a PR has no issue, reason from its actual before/after code and inspect surrounding code if needed. Explain the affected user scenario, supported solution, outcome and limitations; consolidate related PRs. Never invent a defect or guarantee.
 Only the source repository and explicit GitHub references reachable within ${this.limits.maxDepth} link levels are accessible. Source file reads use frozen from/to SHAs; PR reads expose immutable base/head/merge revisions for further file reads. Use only those revisions. The tool returns paginated, chunked evidence with nextPage/nextOffset; a fragment is not the complete document. If relevant evidence is inaccessible, qualify conclusions and set needsReview.
 Budget: ${this.limits.maxCalls} calls, ${this.limits.maxBytes} returned bytes. Tool errors and budgets are explicit; do not claim you read material you did not receive.
 Frozen repository: ${this.snapshot.repository}; from: ${this.snapshot.fromSha}; to: ${this.snapshot.toSha}.
-Required targets: ${JSON.stringify([...this.required.values()])}
-Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
+Full evidence is stored outside the conversation. Start with release_evidence index and read targets for required GitHub reads. Index pages and document fragments are bounded; follow nextPage and nextOffset. Read all required documents, especially the COMPLETE net-diff, including deletions, and every source's metadata. Per-source diff documents are available for deeper investigation without repeating the entire range in the initial prompt.
+Use research_notebook save to checkpoint each problem's findings AS YOU INVESTIGATE, with a stable id. Saving that id replaces its old conclusion; remove obsolete ids when consolidating related findings. Saved findings survive context compaction and can be listed/read in pages. Never rely only on conversation memory. Every source must be covered by saved findings, including internal changes and reverted behavior (explain their exclusion in outcome).
+Before writing, reconcile related findings against the frozen endpoints. A regression introduced and fixed within this unreleased range is not a shipped breaking change. Save the corrected combined finding, retaining all relevant source IDs and evidence. Use release_evidence status to check what is still missing.
+Source count: ${this.sourceIds.size}. Required GitHub target count: ${this.required.size}.`;
   }
   tools(): Tool[] {
     return [{ name: 'github_research', description: 'Actively read a scoped GitHub issue, PR, discussion page, changed-file patches or file at an authorized immutable SHA. GET only. Follow nextOffset for more of a document and nextPage for more API results. Returns evidence URLs and hashes.',
       parameters: z.toJSONSchema(argsSchema), skipPermission: true, defer: 'never',
-      handler: (input) => this.execute(input) }];
+      handler: (input) => this.execute(input) },
+    { name: 'release_evidence', description: 'List or read complete frozen release evidence in bounded pages. Documents include source metadata, individual diffs, final net-diff, and required GitHub targets. status reports missing coverage. Follow nextPage/nextOffset; no content is silently truncated.',
+      parameters: z.toJSONSchema(evidenceArgs), skipPermission: true, defer: 'never',
+      handler: input => this.local('release_evidence', input) },
+    { name: 'research_notebook', description: 'Save, replace, remove, list or read structured findings in host-owned storage. Checkpoint before context compaction. One finding may combine several PRs; one PR may contribute to multiple findings. List/read are paginated. No arbitrary filesystem writes.',
+      parameters: z.toJSONSchema(notebookArgs), skipPermission: true, defer: 'never',
+      handler: input => this.local('research_notebook', input) }];
+  }
+  setProgressWriter(writer: () => Promise<void>): void { this.progress = writer; }
+  setPolicy(policy: string): void {
+    if (this.policy === policy) return;
+    if (this.policy !== undefined) throw new Error('Research policy cannot change within an investigation');
+    this.policy = policy;
+    // Editorial instructions remain retrievable after compaction, but are not implementation evidence.
+    this.evidence.add('policy', 'Editorial policy for this run', '', policy);
+  }
+  setChunkBytes(bytes: number): void { this.chunkBytes = Math.max(512, Math.min(12000, Math.floor(bytes))); }
+  private charge(result: unknown): void {
+    const bytes = Buffer.byteLength(JSON.stringify(result));
+    if (this.bytes + bytes > this.limits.maxBytes) {
+      this.failure = 'Research byte budget exhausted; raise research.maxBytes or narrow the range';
+      throw new Error(this.failure);
+    }
+    this.bytes += bytes;
+  }
+  private countCall(): void {
+    if (this.closed) throw new Error('Research session is closed');
+    if (++this.calls > this.limits.maxCalls) {
+      this.failure = 'Research call budget exhausted; raise research.maxCalls or narrow the range';
+      throw new Error(this.failure);
+    }
+  }
+  private local(tool: string, input: unknown): Promise<unknown> {
+    const task = this.queue.then(async () => {
+      let result: any;
+      try {
+        this.countCall();
+        if (tool === 'release_evidence') {
+          const args = evidenceArgs.parse(input);
+          if (args.operation === 'read') {
+            result = this.evidence.read(args.documentId ?? '', args.offset, this.chunkBytes);
+            this.charge(result);
+            this.evidence.acknowledge(result.documentId, result.offset, result.content.length);
+          } else {
+            result = args.operation === 'index' ? this.evidence.index(args.page) : this.status(args.page);
+            this.charge(result);
+          }
+        } else {
+          const args = notebookArgs.parse(input);
+          const id = args.id ?? '';
+          if (args.operation !== 'list' && !id) throw new Error('Research notebook operation requires an id');
+          if (args.operation === 'save') {
+            const finding = findingSchema.parse(args.finding);
+            // Validate citations before acknowledging a checkpoint. Bounded findings stay readable after compaction.
+            if (Buffer.byteLength(JSON.stringify(finding)) > 12000) throw new Error('Research finding is too large; split independent outcomes into separate findings');
+            this.validateFindings([finding], false);
+            result = { saved: id, sources: finding.sources };
+            this.charge(result);
+            this.notebook.set(id, finding);
+            this.findings = undefined;
+          } else if (args.operation === 'remove') {
+            result = { removed: id };
+            this.charge(result);
+            this.notebook.delete(id);
+            this.findings = undefined;
+          } else if (args.operation === 'read') {
+            const finding = this.notebook.get(id);
+            if (!finding) throw new Error('Research finding not found');
+            const content = JSON.stringify(finding);
+            result = { id, offset: args.offset, totalCharacters: content.length, ...fragment(content, args.offset, this.chunkBytes) };
+            this.charge(result);
+          } else {
+            const entries = [...this.notebook];
+            const start = (args.page - 1) * 10;
+            result = { page: args.page, total: entries.length, nextPage: start + 10 < entries.length ? args.page + 1 : null,
+              findings: entries.slice(start, start + 10).map(([id, f]) => ({ id, sourceCount: f.sources.length, sourcesPreview: f.sources.slice(0, 10), outcomePreview: f.outcome.slice(0, 180) })) };
+            this.charge(result);
+          }
+        }
+        this.records.push({ arguments: { tool, ...input as object }, status: 'success', result });
+        if (this.progress) {
+          try { await this.progress(); }
+          catch { this.failure = 'Research checkpoint could not be persisted'; throw new Error(this.failure); }
+        }
+      } catch (error) {
+        result = { error: error instanceof z.ZodError ? 'Invalid research tool arguments' : error instanceof Error ? error.message : 'Research failed' };
+        if (!this.closed && this.calls <= this.limits.maxCalls + 1) this.records.push({ arguments: { tool }, status: 'error', result });
+      }
+      return result;
+    });
+    this.queue = task.catch(() => undefined);
+    return task;
+  }
+  status(page = 1): object {
+    const covered = new Set([...this.notebook.values()].flatMap(f => f.sources));
+    const missingSources = [...this.sourceIds].filter(id => !covered.has(id));
+    const missingTargets = [...this.required].filter(([id]) => !this.read.has(id) && !this.unavailable.has(id)).map(([, t]) => t);
+    const missingDocuments = this.evidence.coverage().filter(d => d.required && d.nextUnreadOffset !== null);
+    const start = (page - 1) * 10, total = Math.max(missingSources.length, missingTargets.length, missingDocuments.length);
+    return { page, nextPage: start + 10 < total ? page + 1 : null, missingSourceCount: missingSources.length,
+      missingSources: missingSources.slice(start, start + 10), missingTargetCount: missingTargets.length,
+      missingTargets: missingTargets.slice(start, start + 10), missingDocumentCount: missingDocuments.length,
+      missingDocuments: missingDocuments.slice(start, start + 10), calls: this.calls, returnedBytes: this.bytes, failure: this.failure };
+  }
+  checkpoint(): object {
+    return { schemaVersion: 1, snapshot: this.snapshot, findings: Object.fromEntries(this.notebook), coverage: this.evidence.coverage(), status: this.status() };
   }
   execute(input: unknown): Promise<unknown> {
     // Serialize to make concurrent model calls obey one shared budget and stable artifact order.
@@ -142,29 +272,23 @@ Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
     const value = args.data;
     let result: unknown;
     try {
-      if (this.closed) throw new Error('Research session is closed');
-      if (++this.calls > this.limits.maxCalls) {
-        this.failure = 'Research call budget exhausted; raise research.maxCalls or narrow the range';
-        throw new Error(this.failure);
-      }
+      this.countCall();
       const target = this.authorize(value);
       const cacheKey = JSON.stringify({ ...value, offset: 0 });
       if (!this.documents.has(cacheKey)) this.documents.set(cacheKey, this.document(value, target));
       const doc = await this.documents.get(cacheKey)!;
-      if (value.offset > doc.content.length) throw new Error('Offset exceeds document length');
-      const end = Math.min(value.offset + 10000, doc.content.length);
+      const part = fragment(doc.content, value.offset, this.chunkBytes);
       result = { url: doc.url, fetchedAt: doc.fetchedAt, sha256: doc.sha256, revision: doc.revision,
         offset: value.offset, totalCharacters: doc.content.length,
-        nextOffset: end < doc.content.length ? end : null, content: doc.content.slice(value.offset, end) };
-      const bytes = Buffer.byteLength(JSON.stringify(result));
-      if (this.bytes + bytes > this.limits.maxBytes) {
-        this.failure = 'Research byte budget exhausted; raise research.maxBytes or narrow the range';
-        throw new Error(this.failure);
-      }
-      this.bytes += bytes;
+        ...part };
+      this.charge(result);
       if (value.operation === 'issue' || value.operation === 'pull_request') {
         const id = key({ repository: value.repository, kind: value.operation, number: value.number! });
-        this.read.add(id);
+        const spans = [...this.documentReads.get(cacheKey) ?? [], [value.offset, value.offset + part.content.length] as [number, number]].sort((a, b) => a[0] - b[0]);
+        this.documentReads.set(cacheKey, spans);
+        let end = 0;
+        for (const span of spans) { if (span[0] > end) break; end = Math.max(end, span[1]); }
+        if (end >= doc.content.length) this.read.add(id);
         this.unavailable.delete(id);
       }
       this.records.push({ arguments: value, status: 'success', result });
@@ -231,11 +355,17 @@ Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
     const root = `/repos/${args.repository}`, url = `https://github.com/${args.repository}`;
     let data: unknown, revision: string | undefined, link: string;
     if (args.operation === 'file') {
-      const blob = await this.get(`${root}/contents/${args.path!.split('/').map(encodeURIComponent).join('/')}?ref=${args.ref}`);
-      if (blob.type !== 'file' || blob.encoding !== 'base64') throw new Error('Only regular text files supported; use a smaller file if the API cannot return its content');
-      const content = Buffer.from(blob.content, 'base64');
-      if (content.includes(0)) throw new Error('Binary files are not supported');
-      data = { path: args.path, content: content.toString('utf8') }; revision = args.ref;
+      let content: string;
+      if (this.sourceFile && args.repository.toLowerCase() === this.snapshot.repository.toLowerCase()
+        && [this.snapshot.fromSha, this.snapshot.toSha].includes(args.ref!)) {
+        content = await this.sourceFile(args.ref!, args.path!);
+      } else {
+        const blob = await this.get(`${root}/contents/${args.path!.split('/').map(encodeURIComponent).join('/')}?ref=${args.ref}`);
+        if (blob.type !== 'file' || blob.encoding !== 'base64') throw new Error('Only regular text files supported; the API did not return file content');
+        content = Buffer.from(blob.content, 'base64').toString('utf8');
+      }
+      if (content.includes('\0')) throw new Error('Binary files are not supported');
+      data = { path: args.path, content }; revision = args.ref;
       link = `${url}/blob/${args.ref}/${args.path!.split('/').map(encodeURIComponent).join('/')}`;
     } else {
       const isPull = args.operation.startsWith('pull_request');
@@ -299,30 +429,40 @@ Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
     if (!parsed.success) throw new Error('Research findings have an invalid schema');
     const report = parsed.data;
     this.rejectedFindings = report;
+    this.validateFindings(report.findings, true);
+    this.findings = report;
+    this.rejectedFindings = undefined;
+  }
+  private validateFindings(findings: Finding[], requireAll: boolean): void {
     const covered = new Set<string>();
     const urls = new Set(this.citationUrls());
     const resource = (value: string) => {
       try { const url = new URL(value); url.hash = ''; return url.href; } catch { return ''; }
     };
-    for (const finding of report.findings) {
+    for (const finding of findings) {
       for (const id of finding.sources) {
         if (!this.sourceIds.has(id)) throw new Error('Research finding cites a source outside the release range');
         covered.add(id);
       }
       if (finding.evidenceUrls.some(url => !urls.has(resource(url)))) throw new Error('Research finding cites evidence not returned by a tool');
     }
-    if ([...this.sourceIds].some(id => !covered.has(id))) throw new Error('Research findings do not account for every release change');
+    if (requireAll && [...this.sourceIds].some(id => !covered.has(id))) throw new Error('Research findings do not account for every release change');
     for (const reference of this.unavailable.values()) {
-      for (const finding of report.findings.filter(f => f.sources.some(id => reference.sources.includes(id)))) {
+      for (const finding of findings.filter(f => f.sources.some(id => reference.sources.includes(id)))) {
         finding.needsReview = true;
-        finding.limitations.push(`Auxiliary reference ${reference.repository}#${reference.number} returned HTTP ${reference.status}; no evidence was obtained. Verify the reference or qualify conclusions using other successfully read evidence.`);
+        const limitation = `Auxiliary reference ${reference.repository}#${reference.number} returned HTTP ${reference.status}; no evidence was obtained. Verify the reference or qualify conclusions using other successfully read evidence.`;
+        if (!finding.limitations.includes(limitation)) finding.limitations.push(limitation);
       }
     }
-    this.findings = report;
-    this.rejectedFindings = undefined;
+  }
+  assertComplete(): void {
+    this.assertInvestigated();
+    this.evidence.assertComplete();
+    if (!this.notebook.size) throw new Error('Research notebook is empty; save findings before composing');
+    this.recordFindings({ findings: [...this.notebook.values()] });
   }
   citationUrls(): string[] {
-    return [...new Set(this.records.filter(r => r.status === 'success').map(r => (r.result as { url: string }).url))];
+    return [...new Set(this.records.filter(r => r.status === 'success').map(r => (r.result as { url?: string }).url).filter((url): url is string => typeof url === 'string' && url.startsWith('https://github.com/')))];
   }
   findingsReport(): unknown { return this.findings; }
   markReviewRequired(notes: Notes): void {
@@ -338,10 +478,16 @@ Initially linked targets: ${JSON.stringify([...this.targets.values()])}`;
     this.diagnostics.push({ phase, errorType: label(data.errorType), errorCode: label(data.errorCode), statusCode: data.statusCode,
       providerErrorType: label(data.providerErrorType), providerErrorParam: label(data.providerErrorParam) });
   }
+  recordMetrics(event: string, data: object): void {
+    const allowed = ['inputTokens', 'outputTokens', 'currentTokens', 'tokenLimit', 'preCompactionTokens', 'postCompactionTokens', 'tokensRemoved', 'success', 'max_prompt_tokens', 'max_context_window_tokens', 'max_output_tokens'];
+    this.diagnostics.push({ event, ...Object.fromEntries(Object.entries(data).filter(([key, value]) => allowed.includes(key)
+      && ((typeof value === 'number' && Number.isFinite(value)) || typeof value === 'boolean'))) });
+  }
   async close(): Promise<void> { this.closed = true; await this.queue; }
   artifact(): object {
     return { schemaVersion: 1, snapshot: this.snapshot, limits: this.limits, calls: this.calls, returnedBytes: this.bytes,
       requiredTargets: [...this.required.values()], unavailableReferences: [...this.unavailable.values()],
-      findings: this.findings, rejectedFindings: this.rejectedFindings, diagnostics: this.diagnostics, records: this.records };
+      findings: this.findings, notebook: Object.fromEntries(this.notebook), coverage: this.evidence.coverage(),
+      rejectedFindings: this.rejectedFindings, diagnostics: this.diagnostics, records: this.records };
   }
 }
