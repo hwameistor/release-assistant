@@ -5,7 +5,7 @@ import { fixture } from './helpers.js';
 import { hash, manifestPath, prepare } from '../src/prepare.js';
 import { validateRelease } from '../src/validate.js';
 import { loadConfig, outputPaths } from '../src/config.js';
-import { updateVersionFile } from '../src/version-files.js';
+import { updateVersionFile, validateVersionFile, type VersionFile } from '../src/version-files.js';
 
 const file = { path: 'values.yaml', fields: ['operator.tag'] };
 const values = `# Image versions for relocation
@@ -103,4 +103,69 @@ test('version fields do not modify shared YAML anchors or accept unsafe or colli
     assert.throws(() => outputPaths(config, 'v1.1.2'), /Unsafe|unique/);
   }
   assert.throws(() => loadConfig('schemaVersion: 1\nai: {model: test}\noutput:\n  versionFiles: [{path: values.yaml, fields: []}]'));
+});
+
+const textFile: VersionFile = { path: 'VERSION', format: 'text' };
+function configureText(tree: Record<string, string>) {
+  tree['release-assistant.yml'] = tree['release-assistant.yml']!.replace('  charts: [Chart.yaml]\n',
+    '  versionFiles:\n    - path: VERSION\n      format: text\n');
+  tree.VERSION = 'v1.1.1\n';
+}
+
+test('text VERSION generation and reruns update one release PR without changing the Chart', async t => {
+  for (const version of ['v1.1.2-alpha1', 'v1.1.2']) {
+    const f = await fixture(); t.after(f.close);
+    configureText(f.github.trees.get(f.to)!);
+    const first = await prepare({ ...f.options, version }, f);
+    const rerun = await prepare({ ...f.options, version }, f);
+    assert.equal(rerun.pull?.number, first.pull?.number);
+    assert.equal(f.github.pulls.length, 1);
+    const head = await f.github.requiredRef('heads', rerun.branch);
+    assert.equal(await f.github.requiredFile('VERSION', head), `${version}\n`);
+    assert.equal(await f.github.requiredFile('Chart.yaml', head), await f.github.requiredFile('Chart.yaml', f.to));
+    assert.ok((await f.github.requiredFile(`changelogs/released/${version}/changelog`, head)).startsWith(`## ${version}\n`));
+    const manifest = JSON.parse(await f.github.requiredFile(manifestPath, head));
+    assert.equal(manifest.files.VERSION, hash(`${version}\n`));
+    assert.deepEqual(manifest.snapshot.versionFiles, [textFile]);
+    assert.ok(!manifest.snapshot.generatedPaths.includes('Chart.yaml'));
+    await validateRelease(f.github, rerun.branch, f.options.targetBranch);
+    // Even an updated hash cannot conceal a version mismatch.
+    f.github.trees.get(head)!.VERSION = 'v1.1.1\n';
+    manifest.files.VERSION = hash('v1.1.1\n');
+    f.github.trees.get(head)![manifestPath] = JSON.stringify(manifest);
+    await assert.rejects(validateRelease(f.github, rerun.branch, f.options.targetBranch), /Release version mismatch: VERSION/);
+  }
+});
+
+test('text version files require one SemVer and reject unexpected configuration fields', () => {
+  for (const content of ['v1.1.1', 'v1.1.1\n', 'v1.1.1\r\n', '1.1.1\n']) {
+    assert.equal(updateVersionFile(content, textFile, 'v1.1.2-alpha1'), 'v1.1.2-alpha1\n');
+  }
+  for (const content of ['', '\n', 'v1.1.1\nv1.1.2\n', 'v1.1.1\n\n', ' v1.1.1\n',
+    'version: v1.1.1\n', 'v01.1.1\n', 'v1.1.1+build\n', 'v1.1.1\n# comment\n']) {
+    assert.throws(() => updateVersionFile(content, textFile, 'v1.1.2'), /must contain one SemVer/);
+    assert.throws(() => validateVersionFile(content, textFile, 'v1.1.2'), /must contain one SemVer/);
+  }
+  for (const entry of ['{path: VERSION}', '{path: VERSION, format: text, fields: [version]}',
+    '{path: VERSION, format: json}', '{path: values.yaml, format: yaml}']) {
+    assert.throws(() => loadConfig(`schemaVersion: 1\nai: {model: test}\noutput:\n  versionFiles: [${entry}]\n`));
+  }
+  for (const path of ['../VERSION', '.github/workflows/release.yml', '.release-assistant/snapshot.json', 'CHANGELOG.md']) {
+    const config = loadConfig(`schemaVersion: 1\nai: {model: test}\noutput:\n  versionFiles: [{path: ${path}, format: text}]\n`);
+    assert.throws(() => outputPaths(config, 'v1.1.2'), /Unsafe|unique/);
+  }
+});
+
+test('missing or malformed VERSION fails before inference or writes', async t => {
+  for (const content of [undefined, '', 'not a version\n', 'v1.1.1\nextra\n']) {
+    const f = await fixture(); t.after(f.close);
+    const tree = f.github.trees.get(f.to)!;
+    configureText(tree);
+    if (content === undefined) delete tree.VERSION;
+    else tree.VERSION = content;
+    await assert.rejects(prepare(f.options, f), /Missing VERSION|must contain one SemVer/);
+    assert.equal(f.github.inferenceCalls, 0);
+    assert.equal(f.github.writes, 0);
+    assert.equal(f.github.pulls.length, 0);
+  }
 });
